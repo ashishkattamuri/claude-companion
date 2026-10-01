@@ -13,9 +13,12 @@ type Settings = { hooks?: Record<string, HookEntry[]> } & Record<string, unknown
 
 export const settingsPath = (claudeDir: string) => join(claudeDir, 'settings.json');
 
-/** The command Claude Code runs when a session ends: hand off to the companion and return at once. */
-export function hookCommand(nodePath: string, cliPath: string): string {
-  return `"${nodePath}" "${cliPath}" hook session-end ${MARKER}`;
+/**
+ * The command Claude Code runs when a session ends: hand off to the companion and return at once.
+ * The CLI runs on Electron's bundled Node, which needs ELECTRON_RUN_AS_NODE to act as plain Node.
+ */
+export function hookCommand(runtimePath: string, cliPath: string, electron: boolean): string {
+  return `${electron ? 'ELECTRON_RUN_AS_NODE=1 ' : ''}"${runtimePath}" "${cliPath}" hook session-end ${MARKER}`;
 }
 
 const isOurs = (e: HookEntry) => e.hooks.some((h) => h.command?.includes(MARKER));

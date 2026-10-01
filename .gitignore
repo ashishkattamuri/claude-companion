@@ -2,3 +2,5 @@ node_modules/
 dist/
 *.sqlite*
 temp.txt
+test/e2e/screenshots/
+out/

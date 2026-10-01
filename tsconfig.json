@@ -9,7 +9,9 @@
     "skipLibCheck": true,
     "jsx": "react-jsx",
     "outDir": "dist",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["node"]
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "electron.vite.config.ts"],
+  "exclude": ["src/renderer"]
 }

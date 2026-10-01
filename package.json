@@ -5,34 +5,46 @@
   "type": "module",
   "license": "MIT",
   "bin": {
-    "companion": "dist/cli.js"
+    "companion": "bin/companion.js"
   },
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsup src/cli.ts --format esm --target node20 --clean",
-    "dev": "tsx src/cli.ts",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "dev": "electron-vite dev",
+    "build": "electron-vite build && tsup src/cli.ts --format esm --target node22 --clean",
+    "app": "electron .",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p src/renderer",
+    "test": "ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs run",
+    "test:e2e": "node test/e2e/run.mjs",
+    "postinstall": "electron-rebuild -f -w better-sqlite3,node-pty"
   },
   "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "better-sqlite3": "^13.0.3",
     "commander": "^15.0.0",
-    "ink": "^7.1.1",
-    "ink-text-input": "^6.0.0",
+    "node-pty": "^1.1.0",
     "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "smol-toml": "^1.9.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.3",
     "@types/react": "^19.3.0",
-    "ink-testing-library": "^4.0.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^44.5.1",
+    "electron-vite": "^5.0.0",
+    "playwright": "^1.63.0",
     "tsup": "^8.5.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
+    "vite": "^7.3.6",
     "vitest": "^3.2.7"
-  }
+  },
+  "main": "out/main/index.js"
 }

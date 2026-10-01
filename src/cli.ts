@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
+import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ClaudeCliClient } from './analyze/llm.js';
 import { recapDay, getRecap } from './analyze/recap.js';
-import { analysisNeeded, readStatus, runJobs, spawnDetachedRun } from './analyze/runner.js';
+import { readStatus, runJobs, spawnDetachedRun } from './analyze/runner.js';
 import { CONFIG_PATH, loadConfig } from './config.js';
 import { hookCommand, hookStatus, installHook, settingsPath, uninstallHook } from './hooks/install.js';
 import { readLiveSessions } from './ingest/live.js';
@@ -14,21 +17,12 @@ import { openDb } from './store/db.js';
 const program = new Command()
   .name('companion')
   .description('A chief of staff for your engineering work, built on Claude Code')
-  .action(async () => {
-    if (!process.stdin.isTTY || !process.stdout.isTTY) {
-      console.error('companion needs an interactive terminal. Try `companion doctor` or `companion scan`.');
-      process.exit(1);
-    }
-    const cfg = loadConfig();
-    const db = openDb(cfg.dbPath);
-    scan(db, cfg);
-    if (analysisNeeded(db, cfg)) spawnDetachedRun(cfg);
-    const [{ render }, { createElement }, { App }] = await Promise.all([
-      import('ink'),
-      import('react'),
-      import('./tui/App.js'),
-    ]);
-    await render(createElement(App, { db, cfg }), { alternateScreen: true }).waitUntilExit();
+  .action(() => {
+    // Open the desktop app, detached so this terminal is free again.
+    const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+    const electron = process.versions.electron ? process.execPath : (createRequire(import.meta.url)('electron') as string);
+    const { ELECTRON_RUN_AS_NODE: _, ...env } = process.env;
+    spawn(electron, [appDir], { detached: true, stdio: 'ignore', env }).unref();
   });
 
 program
@@ -165,7 +159,7 @@ hooks
       process.exit(1);
     }
     const cfg = loadConfig();
-    const { backup } = installHook(cfg.claudeDir, hookCommand(process.execPath, cli));
+    const { backup } = installHook(cfg.claudeDir, hookCommand(process.execPath, cli, !!process.versions.electron));
     console.log(`Installed SessionEnd hook in ${settingsPath(cfg.claudeDir)}`);
     if (backup) console.log(`Backup of your previous settings: ${backup}`);
   });

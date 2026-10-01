@@ -14,6 +14,8 @@ export interface SessionRow {
   messages: number;
   costUsd: number | null;
   transcriptGone: boolean;
+  /** Our rolling summary of the session, when one exists. */
+  summary: string | null;
 }
 
 export interface ProjectRow {
@@ -31,14 +33,23 @@ const SESSION_COLUMNS = `
            '(untitled)') AS title,
   s.last_prompt AS lastPrompt, s.first_ts AS firstTs, s.last_ts AS lastTs,
   s.user_prompt_count AS prompts, s.msg_count AS messages, s.cost_usd AS costUsd,
-  s.transcript_gone AS transcriptGone`;
+  s.transcript_gone AS transcriptGone,
+  json_extract(d.digest_json, '$.summary') AS summary`;
+
+export function getSession(db: DB, id: string): SessionRow | null {
+  return listSessions(db, { id, limit: 1 })[0] ?? null;
+}
 
 export function listSessions(
   db: DB,
-  opts: { search?: string; projectId?: number | null; limit?: number } = {},
+  opts: { search?: string; projectId?: number | null; id?: string; limit?: number } = {},
 ): SessionRow[] {
   const where: string[] = [];
   const params: Record<string, unknown> = { limit: opts.limit ?? 500 };
+  if (opts.id) {
+    where.push('s.id = @id');
+    params.id = opts.id;
+  }
   if (opts.projectId != null) {
     where.push('s.project_id = @projectId');
     params.projectId = opts.projectId;
@@ -51,7 +62,9 @@ export function listSessions(
   }
   const rows = db
     .prepare(
-      `SELECT ${SESSION_COLUMNS} FROM sessions s LEFT JOIN projects p ON p.id = s.project_id
+      `SELECT ${SESSION_COLUMNS} FROM sessions s
+       LEFT JOIN projects p ON p.id = s.project_id
+       LEFT JOIN session_digests d ON d.session_id = s.id
        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
        ORDER BY s.last_ts DESC LIMIT @limit`,
     )
