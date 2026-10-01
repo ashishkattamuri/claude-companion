@@ -12,9 +12,30 @@ The coding agent already exists. The missing layer is the companion experience a
 
 ## Status
 
-This repo starts with the project direction, README, and MIT license.
+The first working version/demo is planned by this weekend. The MVP is built in milestones:
 
-The first working version/demo is planned by this weekend.
+- [x] **M0 – Foundation:** ingest Claude Code transcripts from every project into a local SQLite store (incremental, survives Claude Code's 30-day cleanup, opt-out list), plus `doctor`
+- [ ] **M1 – Sessions:** TUI listing live and recent sessions across projects; resume or start a session
+- [ ] **M2 – Morning recap:** what you did yesterday and action items for today
+- [ ] **M3 – Ideas:** follow-ups and directions from your conversations, run interactively or in the background
+- [ ] **M4 – Hardening:** SessionEnd hook, secret redaction, scheduled recap
+
+## Usage
+
+Requires Node 20+ and Claude Code.
+
+```sh
+npm install
+npm run dev -- scan     # ingest transcripts into ~/.local/share/claude-companion/db.sqlite
+npm run dev -- doctor   # check paths, data, live sessions and transcript-format compatibility
+```
+
+Everything stays on your machine. To exclude projects, create `~/.config/claude-companion/config.toml`:
+
+```toml
+[sources]
+opt_out = ["~/work/secret-project", "~/clients/*"]
+```
 
 ## License
 
