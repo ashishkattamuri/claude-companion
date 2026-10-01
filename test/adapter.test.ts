@@ -43,6 +43,17 @@ describe('normalizeLine', () => {
     });
   });
 
+  it("reads Claude Code's away summaries and drops the settings hint", () => {
+    const line = JSON.stringify({
+      type: 'system', subtype: 'away_summary', uuid: 'w1', sessionId: 's', timestamp: '2026-09-30T10:00:00Z',
+      content: 'Goal: ship retries. Next: fix the test. (disable recaps in /config)',
+    });
+    expect(normalizeLine(line)).toMatchObject({
+      kind: 'message', role: 'system', messageKind: 'away_summary', text: 'Goal: ship retries. Next: fix the test.',
+    });
+    expect(normalizeLine(JSON.stringify({ type: 'system', subtype: 'turn_duration' }))).toEqual({ kind: 'ignored', type: 'system' });
+  });
+
   it('never throws on unknown or malformed input', () => {
     expect(events).toContainEqual({ kind: 'unknown', type: 'brand-new-record-type' });
     expect(events).toContainEqual({ kind: 'invalid' });

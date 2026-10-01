@@ -6,7 +6,15 @@
  */
 import { z } from 'zod';
 
-export type MessageKind = 'prompt' | 'meta' | 'text' | 'tool_use' | 'tool_result' | 'thinking' | 'other';
+export type MessageKind =
+  | 'prompt'
+  | 'meta'
+  | 'text'
+  | 'tool_use'
+  | 'tool_result'
+  | 'thinking'
+  | 'away_summary' // Claude Code's own recap, written when you return to an idle session
+  | 'other';
 
 export interface MessageEvent {
   kind: 'message';
@@ -14,7 +22,7 @@ export interface MessageEvent {
   sessionId: string;
   parentUuid: string | null;
   ts: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';
   messageKind: MessageKind;
   toolName: string | null;
   text: string;
@@ -42,7 +50,7 @@ const IGNORED_TYPES = new Set([
   'atis-latch',
   'file-history-snapshot',
   'queue-operation',
-  'system',
+  'system', // except away_summary, handled below
   'bridge-session',
   'file-history-delta',
   'last-prompt', // when it only carries a leafUuid
@@ -68,6 +76,36 @@ const MessageRecord = z.looseObject({
   message: z.looseObject({ content: z.union([z.string(), z.array(Block)]) }),
 });
 
+const AwaySummaryRecord = z.looseObject({
+  uuid: z.string(),
+  sessionId: z.string(),
+  timestamp: z.string(),
+  content: z.string(),
+  parentUuid: z.string().nullish(),
+  isSidechain: z.boolean().optional(),
+  cwd: z.string().optional(),
+  gitBranch: z.string().optional(),
+  version: z.string().optional(),
+});
+
+function normalizeAwaySummary(r: z.infer<typeof AwaySummaryRecord>): MessageEvent {
+  return {
+    kind: 'message',
+    uuid: r.uuid,
+    sessionId: r.sessionId,
+    parentUuid: r.parentUuid ?? null,
+    ts: r.timestamp,
+    role: 'system',
+    messageKind: 'away_summary',
+    toolName: null,
+    text: truncate(r.content.replace(/\s*\(disable recaps in \/config\)\s*$/, '').trim(), MAX_TEXT),
+    isSidechain: r.isSidechain === true,
+    cwd: r.cwd ?? null,
+    gitBranch: r.gitBranch ?? null,
+    version: r.version ?? null,
+  };
+}
+
 /** User-role text that is harness output, not something the human typed. */
 const META_PREFIXES = ['<command-', '<local-command', '<system-reminder>', '<bash-', '<task-notification>', 'Caveat:'];
 
@@ -86,6 +124,10 @@ export function normalizeLine(line: string): NormalizedEvent {
   if (type === 'user' || type === 'assistant') {
     const parsed = MessageRecord.safeParse(rec);
     return parsed.success ? normalizeMessage(parsed.data) : { kind: 'unknown', type };
+  }
+  if (type === 'system' && rec.subtype === 'away_summary') {
+    const parsed = AwaySummaryRecord.safeParse(rec);
+    return parsed.success ? normalizeAwaySummary(parsed.data) : { kind: 'unknown', type: 'system/away_summary' };
   }
   if (type === 'ai-title' && typeof rec.aiTitle === 'string') return { kind: 'title', sessionId, title: rec.aiTitle };
   // Older Claude Code versions wrote `summary` records that served as the session title.

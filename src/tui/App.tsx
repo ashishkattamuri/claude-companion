@@ -1,16 +1,19 @@
 import { Box, Text, useApp, useInput, useWindowSize } from 'ink';
 import { useCallback, useEffect, useState } from 'react';
+import { getRecap, recapDay } from '../analyze/recap.js';
+import { analysisNeeded, currentStatus, spawnDetachedRun } from '../analyze/runner.js';
 import type { Config } from '../config.js';
 import { readLiveSessions, type LiveSession } from '../ingest/live.js';
 import { scan } from '../ingest/scanner.js';
 import { runInteractive, type LaunchRequest, type LaunchResult } from '../launcher/claude.js';
 import type { DB } from '../store/db.js';
 import { listProjects, listSessions, type ProjectRow, type SessionRow } from '../store/queries.js';
+import { RecapTab } from './RecapTab.js';
 import { SessionsTab, type SessionItem } from './SessionsTab.js';
 
 const TABS = [
-  { key: '1', name: 'Sessions' },
-  { key: '2', name: 'Recap', soon: 'M2: what you did yesterday and action items for today.' },
+  { key: '1', name: 'Sessions', hints: '↑↓ move · enter resume · n new · / search · f project · r refresh · q quit' },
+  { key: '2', name: 'Recap', hints: '↑↓ move · enter start on it · c continue its session · R rewrite · q quit' },
   { key: '3', name: 'Ideas', soon: 'M3: follow-ups and directions from your conversations, one keypress to run.' },
   { key: '4', name: 'Goals', soon: 'Later: long-running goals checked on a schedule that report back only when something changes.' },
   { key: '5', name: 'Feed', soon: 'Later: news related to what you are working on.' },
@@ -18,6 +21,9 @@ const TABS = [
 ] as const;
 
 const REFRESH_MS = 5000;
+/** Poll faster while a background run is writing, so progress shows up promptly. */
+const REFRESH_WHILE_RUNNING_MS = 1500;
+const RECAP_TAB = 1;
 
 export interface AppProps {
   db: DB;
@@ -25,31 +31,40 @@ export interface AppProps {
   /** Injected so tests can render without touching the real terminal or Claude Code. */
   loadLive?: () => LiveSession[];
   launch?: (req: LaunchRequest) => LaunchResult | Promise<LaunchResult>;
+  startAnalysis?: (args: string[]) => void;
 }
 
-export function App({ db, cfg, loadLive = () => readLiveSessions(cfg.claudeDir), launch }: AppProps) {
+export function App({
+  db,
+  cfg,
+  loadLive = () => readLiveSessions(cfg.claudeDir),
+  launch,
+  startAnalysis = (args) => spawnDetachedRun(cfg, args),
+}: AppProps) {
   const { exit, suspendTerminal } = useApp();
   const { columns, rows } = useWindowSize();
-  const [tab, setTab] = useState(0);
+  // The first time you open the companion each day, it opens on the recap.
+  const [tab, setTab] = useState(() => (claimFirstOpenToday(db, cfg) ? RECAP_TAB : 0));
   const [inputLocked, setInputLocked] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [projectFilter, setProjectFilter] = useState<ProjectRow | null>(null);
-  const [data, setData] = useState(() => load(db, loadLive, search, projectFilter));
+  const [data, setData] = useState(() => load(db, cfg, loadLive, search, projectFilter));
+  const running = data.status?.state === 'running';
 
   const refresh = useCallback(
     (rescan = true) => {
       if (rescan) scan(db, cfg);
-      setData(load(db, loadLive, search, projectFilter));
+      setData(load(db, cfg, loadLive, search, projectFilter));
     },
     [db, cfg, loadLive, search, projectFilter],
   );
 
   useEffect(() => refresh(false), [search, projectFilter]);
   useEffect(() => {
-    const t = setInterval(() => refresh(), REFRESH_MS);
+    const t = setInterval(() => refresh(), running ? REFRESH_WHILE_RUNNING_MS : REFRESH_MS);
     return () => clearInterval(t);
-  }, [refresh]);
+  }, [refresh, running]);
 
   // Messages fade after a while so stale errors don't linger.
   useEffect(() => {
@@ -66,9 +81,16 @@ export function App({ db, cfg, loadLive = () => readLiveSessions(cfg.claudeDir),
       });
       setMessage(result.error ? `Could not start claude: ${result.error}` : 'Back from claude.');
       refresh();
+      if (analysisNeeded(db, cfg)) startAnalysis([]);
     },
-    [suspendTerminal, launch, refresh],
+    [suspendTerminal, launch, refresh, db, cfg, startAnalysis],
   );
+
+  const regenerateRecap = useCallback(() => {
+    startAnalysis(['--force-recap']);
+    setMessage('Rewriting the recap in the background…');
+    setTimeout(() => refresh(false), 300);
+  }, [startAnalysis, refresh]);
 
   useInput(
     (input) => {
@@ -101,7 +123,17 @@ export function App({ db, cfg, loadLive = () => readLiveSessions(cfg.claudeDir),
         ))}
       </Box>
       <Box height={bodyHeight} marginTop={1}>
-        {'soon' in current ? (
+        {tab === RECAP_TAB ? (
+          <RecapTab
+            db={db}
+            recap={data.recap}
+            status={data.status}
+            onLaunch={onLaunch}
+            onRegenerate={regenerateRecap}
+            onMessage={setMessage}
+            height={bodyHeight}
+          />
+        ) : 'soon' in current ? (
           <Box paddingX={2} flexDirection="column">
             <Text bold>{current.name}</Text>
             <Text dimColor>Coming in {current.soon}</Text>
@@ -130,11 +162,13 @@ export function App({ db, cfg, loadLive = () => readLiveSessions(cfg.claudeDir),
         ) : (
           <>
             <Text dimColor wrap="truncate">
-              {inputLocked
-                ? 'enter confirm · esc cancel'
-                : '↑↓ move · enter resume · n new · / search · f project · r refresh · q quit'}
+              {inputLocked ? 'enter confirm · esc cancel' : 'hints' in current ? current.hints : '1-6 switch tabs · q quit'}
             </Text>
-            <Text color="green">{` ${liveCount} live`}</Text>
+            {running ? (
+              <Text color="cyan">{` ⟳ ${data.status!.step ?? 'working'}${data.status!.total ? ` ${data.status!.done}/${data.status!.total}` : ''}`}</Text>
+            ) : (
+              <Text color="green">{` ${liveCount} live`}</Text>
+            )}
           </>
         )}
       </Box>
@@ -142,7 +176,15 @@ export function App({ db, cfg, loadLive = () => readLiveSessions(cfg.claudeDir),
   );
 }
 
-function load(db: DB, loadLive: () => LiveSession[], search: string, filter: ProjectRow | null) {
+function claimFirstOpenToday(db: DB, cfg: Config): boolean {
+  const { day } = recapDay(cfg);
+  const seen = db.prepare(`SELECT value FROM meta WHERE key = 'recap_shown_day'`).get() as { value: string } | undefined;
+  if (seen?.value === day) return false;
+  db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('recap_shown_day', ?)`).run(day);
+  return true;
+}
+
+function load(db: DB, cfg: Config, loadLive: () => LiveSession[], search: string, filter: ProjectRow | null) {
   const live = new Map(loadLive().map((l) => [l.sessionId, l]));
   const rows = listSessions(db, { search, projectId: filter?.id });
   const items: SessionItem[] = rows.map((r) => ({ ...r, live: live.get(r.id) ?? null }));
@@ -156,7 +198,12 @@ function load(db: DB, loadLive: () => LiveSession[], search: string, filter: Pro
     }
   }
   items.sort((a, b) => Number(!!b.live) - Number(!!a.live) || (b.lastTs ?? '').localeCompare(a.lastTs ?? ''));
-  return { items, projects: listProjects(db) };
+  return {
+    items,
+    projects: listProjects(db),
+    recap: getRecap(db, recapDay(cfg).day),
+    status: currentStatus(db, cfg),
+  };
 }
 
 function liveOnly(l: LiveSession): SessionItem {

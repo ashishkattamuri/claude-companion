@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { render } from 'ink-testing-library';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { recapDay } from '../src/analyze/recap.js';
 import { loadConfig, type Config } from '../src/config.js';
 import type { LiveSession } from '../src/ingest/live.js';
 import { scan } from '../src/ingest/scanner.js';
@@ -32,7 +33,13 @@ beforeEach(() => {
   // The fixture's cwd doesn't exist; point the session at a real folder so it can be resumed.
   db.prepare(`UPDATE sessions SET cwd = ?`).run(root);
   db.prepare(`UPDATE projects SET cwd = ?`).run(root);
+  markRecapShown();
 });
+
+/** The app opens on the recap the first time each day; most tests want the Sessions tab. */
+function markRecapShown() {
+  db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('recap_shown_day', ?)`).run(recapDay(cfg).day);
+}
 
 afterEach(() => {
   db.close();
@@ -41,8 +48,9 @@ afterEach(() => {
 
 function renderApp(live: LiveSession[] = []) {
   const launch = vi.fn(async (_req: LaunchRequest) => ({ code: 0 }));
-  const ui = render(<App db={db} cfg={cfg} loadLive={() => live} launch={launch} />);
-  return { ...ui, launch };
+  const startAnalysis = vi.fn((_args: string[]) => {});
+  const ui = render(<App db={db} cfg={cfg} loadLive={() => live} launch={launch} startAnalysis={startAnalysis} />);
+  return { ...ui, launch, startAnalysis };
 }
 
 describe('Sessions tab', () => {
@@ -125,8 +133,79 @@ describe('Sessions tab', () => {
   it('switches to placeholder tabs with number keys', async () => {
     const { stdin, lastFrame } = renderApp();
     await tick();
+    stdin.write('3');
+    await tick();
+    expect(lastFrame()).toContain('Coming in M3');
+  });
+});
+
+describe('Recap tab', () => {
+  function storeRecap() {
+    const recap = {
+      headline: 'Retries are nearly done; one flaky test left.',
+      projects: [{ project: 'demo-app', summary: 'Added retry logic to the webhook handler.', session_ids: [SESSION] }],
+      action_items: [
+        { text: 'Fix the flaky backoff test', why: 'It failed twice yesterday', priority: 'high', project: 'demo-app', session_id: SESSION },
+        { text: 'Write the changelog', why: 'Release is pending', priority: 'low', project: 'demo-app', session_id: '' },
+      ],
+      blockers: ['Waiting on staging credentials'],
+    };
+    db.prepare(
+      `INSERT INTO recaps(day, window_start, window_end, session_ids, model, prompt_version, recap_json, created_at)
+       VALUES (?, ?, ?, ?, 'sonnet', 1, ?, ?)`,
+    ).run(recapDay(cfg).day, '2026-09-30T10:00:00Z', '2026-10-01T10:00:00Z', JSON.stringify([SESSION]), JSON.stringify(recap), new Date().toISOString());
+  }
+
+  it('opens on the recap the first time each day', () => {
+    db.prepare(`DELETE FROM meta WHERE key = 'recap_shown_day'`).run();
+    storeRecap();
+    expect(renderApp().lastFrame()).toContain('Retries are nearly done');
+    expect(renderApp().lastFrame()).not.toContain('Retries are nearly done'); // second open: Sessions
+  });
+
+  it('shows action items, blockers and projects', async () => {
+    storeRecap();
+    const { stdin, lastFrame } = renderApp();
+    await tick();
     stdin.write('2');
     await tick();
-    expect(lastFrame()).toContain('Coming in M2');
+    const frame = lastFrame()!;
+    expect(frame).toContain('Fix the flaky backoff test');
+    expect(frame).toContain('It failed twice yesterday');
+    expect(frame).toContain('Waiting on staging credentials');
+    expect(frame).toContain('Added retry logic');
+  });
+
+  it('starts a session on an action item, or continues the session it came from', async () => {
+    storeRecap();
+    const { stdin, launch } = renderApp();
+    await tick();
+    stdin.write('2');
+    await tick();
+    stdin.write(ENTER);
+    await tick();
+    expect(launch).toHaveBeenLastCalledWith({ cwd: root, args: ['Fix the flaky backoff test'] });
+    stdin.write('c');
+    await tick();
+    expect(launch).toHaveBeenLastCalledWith({ cwd: root, args: ['--resume', SESSION] });
+  });
+
+  it('rewrites the recap in the background on R', async () => {
+    storeRecap();
+    const { stdin, startAnalysis } = renderApp();
+    await tick();
+    stdin.write('2');
+    await tick();
+    stdin.write('R');
+    await tick();
+    expect(startAnalysis).toHaveBeenCalledWith(['--force-recap']);
+  });
+
+  it('explains when there is no recap yet', async () => {
+    const { stdin, lastFrame } = renderApp();
+    await tick();
+    stdin.write('2');
+    await tick();
+    expect(lastFrame()).toContain('No recap yet');
   });
 });

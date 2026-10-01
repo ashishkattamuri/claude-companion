@@ -63,4 +63,55 @@ export const MIGRATIONS: string[] = [
 
   CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   `,
+  `
+  -- Make Claude Code's away summaries searchable.
+  DROP TRIGGER messages_ai;
+  DROP TRIGGER messages_ad;
+  CREATE TRIGGER messages_ai AFTER INSERT ON messages
+    WHEN new.kind IN ('prompt', 'text', 'away_summary') AND new.text <> '' BEGIN
+    INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
+  END;
+  CREATE TRIGGER messages_ad AFTER DELETE ON messages
+    WHEN old.kind IN ('prompt', 'text', 'away_summary') AND old.text <> '' BEGIN
+    INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+  END;
+
+  -- Re-read transcripts from the start to pick up away_summary records skipped before.
+  -- Message inserts are idempotent, so this only adds what was missing.
+  DELETE FROM ingest_files;
+
+  -- One rolling summary per session, extended as the session grows.
+  CREATE TABLE session_digests (
+    session_id     TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    covers_until   TEXT NOT NULL,   -- timestamp of the last message the summary accounts for
+    source         TEXT NOT NULL,   -- away_summary (written by Claude Code) | llm (written by us)
+    model          TEXT,
+    prompt_version INTEGER NOT NULL,
+    digest_json    TEXT NOT NULL,
+    created_at     TEXT NOT NULL
+  );
+
+  CREATE TABLE recaps (
+    day            TEXT PRIMARY KEY,  -- local date the recap is for, YYYY-MM-DD
+    window_start   TEXT NOT NULL,
+    window_end     TEXT NOT NULL,
+    session_ids    TEXT NOT NULL,     -- JSON array
+    model          TEXT NOT NULL,
+    prompt_version INTEGER NOT NULL,
+    recap_json     TEXT NOT NULL,
+    created_at     TEXT NOT NULL
+  );
+
+  -- Every model call the companion makes, so its usage is visible.
+  CREATE TABLE llm_calls (
+    id          INTEGER PRIMARY KEY,
+    ts          TEXT NOT NULL,
+    purpose     TEXT NOT NULL,
+    model       TEXT NOT NULL,
+    ok          INTEGER NOT NULL,
+    cost_usd    REAL,
+    duration_ms INTEGER,
+    error       TEXT
+  );
+  `,
 ];
