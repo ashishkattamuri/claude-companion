@@ -19,12 +19,17 @@
   "dependencies": {
     "better-sqlite3": "^13.0.3",
     "commander": "^15.0.0",
+    "ink": "^7.1.1",
+    "ink-text-input": "^6.0.0",
+    "react": "^19.3.0",
     "smol-toml": "^1.9.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.3",
+    "@types/react": "^19.3.0",
+    "ink-testing-library": "^4.0.0",
     "tsup": "^8.5.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",

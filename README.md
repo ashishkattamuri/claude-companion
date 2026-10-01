@@ -15,7 +15,7 @@ The coding agent already exists. The missing layer is the companion experience a
 The first working version/demo is planned by this weekend. The MVP is built in milestones:
 
 - [x] **M0 – Foundation:** ingest Claude Code transcripts from every project into a local SQLite store (incremental, survives Claude Code's 30-day cleanup, opt-out list), plus `doctor`
-- [ ] **M1 – Sessions:** TUI listing live and recent sessions across projects; resume or start a session
+- [x] **M1 – Sessions:** TUI listing live and recent sessions across projects; search, resume or start a session
 - [ ] **M2 – Morning recap:** what you did yesterday and action items for today
 - [ ] **M3 – Ideas:** follow-ups and directions from your conversations, run interactively or in the background
 - [ ] **M4 – Hardening:** SessionEnd hook, secret redaction, scheduled recap
@@ -25,10 +25,14 @@ The first working version/demo is planned by this weekend. The MVP is built in m
 Requires Node 20+ and Claude Code.
 
 ```sh
-npm install
-npm run dev -- scan     # ingest transcripts into ~/.local/share/claude-companion/db.sqlite
-npm run dev -- doctor   # check paths, data, live sessions and transcript-format compatibility
+npm install && npm run build && npm link   # puts `companion` on your PATH
+
+companion          # open the TUI
+companion scan     # ingest transcripts into ~/.local/share/claude-companion/db.sqlite
+companion doctor   # check paths, data, live sessions and transcript-format compatibility
 ```
+
+In the Sessions tab: `↑↓` move, `enter` resume, `n` new session, `/` search everything you and Claude wrote, `f` filter by project, `1`–`6` switch tabs, `q` quit. When Claude exits you land back in the companion.
 
 Everything stays on your machine. To exclude projects, create `~/.config/claude-companion/config.toml`:
 

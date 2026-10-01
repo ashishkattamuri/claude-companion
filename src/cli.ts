@@ -8,7 +8,22 @@ import { openDb } from './store/db.js';
 
 const program = new Command()
   .name('companion')
-  .description('A chief of staff for your engineering work, built on Claude Code');
+  .description('A chief of staff for your engineering work, built on Claude Code')
+  .action(async () => {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      console.error('companion needs an interactive terminal. Try `companion doctor` or `companion scan`.');
+      process.exit(1);
+    }
+    const cfg = loadConfig();
+    const db = openDb(cfg.dbPath);
+    scan(db, cfg);
+    const [{ render }, { createElement }, { App }] = await Promise.all([
+      import('ink'),
+      import('react'),
+      import('./tui/App.js'),
+    ]);
+    await render(createElement(App, { db, cfg }), { alternateScreen: true }).waitUntilExit();
+  });
 
 program
   .command('scan')
@@ -71,4 +86,4 @@ program
     for (const s of live) console.log(`  ${s.status === 'busy' ? '●' : '○'} ${s.name ?? s.sessionId}  ${s.cwd}`);
   });
 
-program.parse();
+await program.parseAsync();
