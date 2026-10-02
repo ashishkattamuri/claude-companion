@@ -20,6 +20,7 @@ const api: CompanionApi = {
   interrupt: (id) => ipcRenderer.send('session:interrupt', id),
   cyclePermissionMode: (id) => ipcRenderer.send('session:cycleMode', id),
   stop: (id) => ipcRenderer.invoke('session:stop', id),
+  openInTerminal: (id) => ipcRenderer.invoke('session:openInTerminal', id),
   pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
   replayTerminal: (id) => ipcRenderer.invoke('term:replay', id),
   writeTerminal: (id, data) => ipcRenderer.send('term:write', id, data),

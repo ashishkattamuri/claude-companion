@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { basename } from 'node:path';
 import type { ConversationItem } from '../adapter/conversation.js';
@@ -11,7 +10,9 @@ import { scan } from '../ingest/scanner.js';
 import type { DB } from '../store/db.js';
 import { getSession, listProjects, listSessions, type SessionRow } from '../store/queries.js';
 import type { NewSessionRequest, RecapView, Result, SessionListItem, SessionSnapshot, SessionState } from '../shared/api.js';
-import { SessionChannel, type ChannelDeps } from './session.js';
+import { startBackground, stopBackground } from './background.js';
+import { SessionChannel, type ChannelDeps, type ChannelInfo } from './session.js';
+import { openInTerminalApp } from './terminal-app.js';
 
 export interface ServiceDeps {
   db: DB;
@@ -22,8 +23,6 @@ export interface ServiceDeps {
   claudeBin?: string;
   /** Background summaries and recaps; off in end-to-end tests so they make no extra model calls. */
   analysis?: boolean;
-  /** Tests inject a fake channel factory; the app uses real pseudo-terminals. */
-  createChannel?: (id: string, deps: ChannelDeps, info: ConstructorParameters<typeof SessionChannel>[2]) => SessionChannel;
   onItems?: (sessionId: string, items: ConversationItem[]) => void;
   onState?: (state: SessionState) => void;
   onData?: (sessionId: string, data: string, end: number) => void;
@@ -31,15 +30,26 @@ export interface ServiceDeps {
   onChanged?: () => void;
 }
 
+const ok: Result = { ok: true, value: undefined };
+
 /**
  * Everything the window can ask for, independent of Electron. The main process wires these
- * methods to IPC. One SessionChannel per session the window has open or the app is running.
+ * methods to IPC. One SessionChannel per session the window has open or has attached to.
  */
 export class CompanionService {
   private channels = new Map<string, SessionChannel>();
   private analyzing: Promise<void> | null = null;
 
   constructor(private d: ServiceDeps) {}
+
+  private get channelDeps(): ChannelDeps {
+    return {
+      projectsDir: this.d.cfg.projectsDir,
+      claudeDir: this.d.cfg.claudeDir,
+      claudeBin: this.d.claudeBin ?? process.env.COMPANION_CLAUDE_BIN ?? 'claude',
+      env: this.d.env,
+    };
+  }
 
   refresh(): void {
     scan(this.d.db, this.d.cfg);
@@ -48,31 +58,22 @@ export class CompanionService {
   listSessions(query: { search?: string }): SessionListItem[] {
     const live = new Map(this.d.loadLive().map((l) => [l.sessionId, l]));
     const rows = listSessions(this.d.db, { search: query.search });
-    const items: SessionListItem[] = rows.map((r) => this.listItem(r, live.get(r.id) ?? null));
-    const known = new Set(rows.map((r) => r.id));
-
+    const items = rows.map((r) => this.listItem(r, live.get(r.id) ?? null));
     if (!query.search) {
-      // Running sessions with no transcript yet: just started here or elsewhere.
-      for (const ch of this.channels.values()) {
-        if (known.has(ch.sessionId) || !ch.running) continue;
-        known.add(ch.sessionId);
-        items.push(this.listItem(placeholderRow(ch.sessionId, ch.state.cwd, ch.state.title), live.get(ch.sessionId) ?? null));
-      }
+      // Running sessions with no transcript yet.
+      const known = new Set(rows.map((r) => r.id));
       for (const l of live.values()) {
-        if (known.has(l.sessionId)) continue;
-        items.push(this.listItem(placeholderRow(l.sessionId, l.cwd, l.name ?? '(new session)'), l));
+        if (!known.has(l.sessionId)) items.push(this.listItem(placeholderRow(l.sessionId, l.cwd, l.name ?? '(new session)'), l));
       }
     }
-    const rank = (s: SessionListItem) => (s.status === 'waiting' ? 3 : s.owned ? 2 : s.live ? 1 : 0);
+    const rank = (s: SessionListItem) => (s.status === 'waiting' ? 3 : s.attached ? 2 : s.live ? 1 : 0);
     return items.sort((a, b) => rank(b) - rank(a) || (b.lastTs ?? '').localeCompare(a.lastTs ?? ''));
   }
 
   private listItem(row: SessionRow, live: LiveSession | null): SessionListItem {
     const ch = this.channels.get(row.id);
-    const owned = !!ch?.running;
-    const status = owned ? ch!.state.status : live ? (live.status === 'busy' ? 'busy' : live.status === 'waiting' ? 'waiting' : 'idle') : null;
-    // A session running here also shows in Claude Code's registry; it's ours, not "elsewhere".
-    return { ...row, live: owned ? null : live, owned, status };
+    const status = ch?.alive ? ch.state.status : live ? (live.status === 'busy' ? 'busy' : live.status === 'waiting' ? 'waiting' : 'idle') : null;
+    return { ...row, live, background: live?.kind === 'bg', attached: !!ch?.attached, status };
   }
 
   listProjects() {
@@ -98,76 +99,79 @@ export class CompanionService {
     return this.analyzing;
   }
 
+  /** Starts showing a session. A background session is attached right away, so it can be driven. */
   openSession(sessionId: string): Result<SessionSnapshot> {
-    const existing = this.channels.get(sessionId);
-    if (existing) return { ok: true, value: existing.snapshot() };
-    const row = getSession(this.d.db, sessionId);
-    const live = this.d.loadLive().find((l) => l.sessionId === sessionId) ?? null;
-    if (!row && !live) return { ok: false, error: 'Unknown session.' };
-    const ch = this.channel(sessionId, {
-      cwd: row?.cwd ?? live?.cwd ?? null,
-      title: row?.title ?? live?.name ?? '(new session)',
-      mode: live ? 'mirror' : 'history',
-      mirrorPid: live?.pid,
-    });
+    let ch = this.channels.get(sessionId);
+    if (!ch) {
+      const row = getSession(this.d.db, sessionId);
+      const live = this.d.loadLive().find((l) => l.sessionId === sessionId) ?? null;
+      if (!row && !live) return { ok: false, error: 'Unknown session.' };
+      const info: ChannelInfo = { cwd: row?.cwd ?? live?.cwd ?? null, title: row?.title ?? live?.name ?? '(new session)', mode: 'history' };
+      if (live?.kind === 'bg' && live.jobId) Object.assign(info, { mode: 'background', jobId: live.jobId });
+      else if (live) Object.assign(info, { mode: 'mirror', mirrorPid: live.pid });
+      ch = this.channel(sessionId, info);
+    }
+    if (ch.state.mode === 'background') ch.attach();
     return { ok: true, value: ch.snapshot() };
   }
 
-  /** The window stopped showing a session. Sessions running here keep running. */
+  /** The window stopped showing a session. Attached sessions stay attached. */
   closeSessionView(sessionId: string): void {
     const ch = this.channels.get(sessionId);
-    if (ch && !ch.running) {
-      ch.dispose();
-      this.channels.delete(sessionId);
-    }
+    if (ch && !ch.attached) this.dropChannel(sessionId);
   }
 
-  newSession(req: NewSessionRequest): Result<string> {
+  async newSession(req: NewSessionRequest): Promise<Result<string>> {
     if (!existsSync(req.cwd)) return { ok: false, error: `Folder not found: ${req.cwd}` };
-    // Choosing the id up front ties the session to its transcript from the first message.
-    const sessionId = randomUUID();
     const prompt = req.prompt?.trim();
-    const args = ['--session-id', sessionId];
+    const args: string[] = [];
     if (req.model) args.push('--model', req.model);
     if (req.permissionMode && req.permissionMode !== 'default') args.push('--permission-mode', req.permissionMode);
     if (req.worktree) args.push('--worktree');
     if (prompt) args.push(prompt);
-    const ch = this.channel(sessionId, {
-      cwd: req.cwd,
-      title: prompt ? prompt.split('\n')[0]!.slice(0, 80) : `New session · ${basename(req.cwd)}`,
-      mode: 'owned',
-    });
-    if (prompt) ch.expectFromApp(prompt);
+    let entry;
     try {
-      ch.start(args);
+      entry = await startBackground(this.channelDeps, req.cwd, args);
     } catch (err) {
-      this.dropChannel(sessionId);
       return { ok: false, error: `Could not start claude: ${(err as Error).message}` };
     }
+    const ch = this.channel(entry.sessionId, {
+      cwd: req.cwd,
+      title: prompt ? prompt.split('\n')[0]!.slice(0, 80) : `New session · ${basename(req.cwd)}`,
+      mode: 'history',
+      sentFromApp: prompt ? [prompt] : [],
+    });
+    ch.useBackground(entry);
+    ch.attach();
     this.d.onChanged?.();
-    return { ok: true, value: sessionId };
+    return { ok: true, value: entry.sessionId };
   }
 
-  send(sessionId: string, text: string): Result {
+  async send(sessionId: string, text: string): Promise<Result> {
     if (!text.trim()) return { ok: false, error: 'Nothing to send.' };
     const opened = this.openSession(sessionId);
     if (!opened.ok) return opened;
     const ch = this.channels.get(sessionId)!;
     if (ch.state.mode === 'mirror')
-      return { ok: false, error: 'This session is running in another terminal. Quit it there to continue here.' };
-    if (!ch.running) {
+      return {
+        ok: false,
+        error:
+          'This session runs in a plain terminal, which only that terminal can type into. Start sessions with `claude --bg` (or from Companion) to drive them from both places.',
+      };
+    if (ch.state.mode === 'history') {
       const row = getSession(this.d.db, sessionId);
       if (row?.transcriptGone) return { ok: false, error: 'Claude Code deleted this transcript, so it can no longer be continued.' };
       if (!ch.state.cwd || !existsSync(ch.state.cwd)) return { ok: false, error: `Project folder not found: ${ch.state.cwd ?? 'unknown'}` };
       try {
-        ch.start(['--resume', sessionId]);
+        ch.useBackground(await startBackground(this.channelDeps, ch.state.cwd, ['--resume', sessionId]));
       } catch (err) {
-        return { ok: false, error: `Could not start claude: ${(err as Error).message}` };
+        return { ok: false, error: `Could not continue the session: ${(err as Error).message}` };
       }
       this.d.onChanged?.();
     }
+    ch.attach();
     ch.send(text);
-    return { ok: true, value: undefined };
+    return ok;
   }
 
   answer(sessionId: string, key: string): void {
@@ -182,8 +186,15 @@ export class CompanionService {
     this.channels.get(sessionId)?.cyclePermissionMode();
   }
 
-  stop(sessionId: string): void {
-    this.channels.get(sessionId)?.stop();
+  async stop(sessionId: string): Promise<void> {
+    const jobId = this.channels.get(sessionId)?.state.jobId;
+    if (jobId) await stopBackground(this.channelDeps, jobId);
+  }
+
+  async openInTerminal(sessionId: string): Promise<Result> {
+    const ch = this.channels.get(sessionId);
+    if (!ch?.state.jobId) return { ok: false, error: 'Only running sessions can be opened in a terminal. Send a message to start it.' };
+    return openInTerminalApp(`claude attach ${ch.state.jobId}`, ch.state.cwd ?? process.cwd());
   }
 
   replay(sessionId: string): { data: string; end: number } | null {
@@ -198,28 +209,19 @@ export class CompanionService {
     this.channels.get(sessionId)?.resize(cols, rows);
   }
 
-  running(): SessionChannel[] {
-    return [...this.channels.values()].filter((c) => c.running);
-  }
-
+  /** Detaches from everything. Background sessions keep running without Companion. */
   disposeAll(): void {
     for (const id of [...this.channels.keys()]) this.dropChannel(id);
   }
 
-  private channel(sessionId: string, info: ConstructorParameters<typeof SessionChannel>[2]): SessionChannel {
-    const deps: ChannelDeps = {
-      projectsDir: this.d.cfg.projectsDir,
-      claudeDir: this.d.cfg.claudeDir,
-      claudeBin: this.d.claudeBin ?? process.env.COMPANION_CLAUDE_BIN ?? 'claude',
-      env: this.d.env,
-    };
-    const ch = this.d.createChannel ? this.d.createChannel(sessionId, deps, info) : new SessionChannel(sessionId, deps, info);
+  private channel(sessionId: string, info: ChannelInfo): SessionChannel {
+    const ch = new SessionChannel(sessionId, this.channelDeps, info);
     ch.on('items', (items: ConversationItem[]) => this.d.onItems?.(sessionId, items));
     ch.on('state', (state: SessionState) => this.d.onState?.(state));
     ch.on('data', (data: string, end: number) => this.d.onData?.(sessionId, data, end));
     ch.on('sent', (itemId: string) => this.d.onSent?.(sessionId, itemId));
     ch.on('status', () => this.d.onChanged?.());
-    ch.on('exit', () => {
+    ch.on('ended', () => {
       // The session just ended: index it and refresh its summary.
       this.refresh();
       void this.analyze({ endedSessionIds: [sessionId] });

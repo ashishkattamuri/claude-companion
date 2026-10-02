@@ -24,8 +24,8 @@ interface Props {
 
 export function Sidebar({ page, sessions, selectedId, search, onSearch, onPage, onSelect, onNew }: Props) {
   const needs = sessions.filter((s) => s.status === 'waiting');
-  const running = sessions.filter((s) => s.status !== 'waiting' && (s.owned || s.live));
-  const earlier = sessions.filter((s) => s.status !== 'waiting' && !s.owned && !s.live).slice(0, 80);
+  const running = sessions.filter((s) => s.status !== 'waiting' && (s.attached || s.live));
+  const earlier = sessions.filter((s) => s.status !== 'waiting' && !s.attached && !s.live).slice(0, 80);
 
   return (
     <aside className="sidebar">
@@ -96,7 +96,7 @@ function Group({
           <span className="s-time">{s.status === 'busy' ? 'now' : timeAgo(s.lastTs, Date.now(), true)}</span>
           <span className="s-meta">
             <span className="proj">{s.project ?? '?'}</span>
-            {s.live && !s.owned && <span className="where">other terminal</span>}
+            {s.live && !s.background && <span className="where" title="A plain claude in another terminal: view only">other terminal</span>}
             {s.status === 'waiting' && <span className="needs-label">needs you</span>}
             {s.transcriptGone && <span className="where">archived</span>}
           </span>
@@ -107,15 +107,15 @@ function Group({
 }
 
 const dotClass = (s: SessionListItem) =>
-  s.status === 'waiting' ? 'needs' : s.status === 'busy' ? 'working' : s.owned ? 'open' : s.live ? 'external' : 'idle';
+  s.status === 'waiting' ? 'needs' : s.status === 'busy' ? 'working' : s.background ? 'open' : s.live ? 'external' : 'idle';
 
 const dotTitle = (s: SessionListItem) =>
   s.status === 'waiting'
     ? 'Waiting for you'
     : s.status === 'busy'
       ? 'Claude is working'
-      : s.owned
-        ? 'Running in Companion'
+      : s.background
+        ? 'Running · drive it here or in any attached terminal'
         : s.live
-          ? 'Running in another terminal'
+          ? 'Running in a plain terminal (view only)'
           : 'Not running';

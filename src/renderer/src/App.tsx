@@ -88,7 +88,7 @@ export function App() {
       />
       <main className="content">
         {selection.kind === 'session' && (
-          <SessionWorkspace key={selection.id} sessionId={selection.id} draft={selection.draft} />
+          <SessionWorkspace key={selection.id} sessionId={selection.id} draft={selection.draft} onError={setToast} />
         )}
         {selection.kind === 'page' && selection.page === 'today' && (
           <TodayView

@@ -31,7 +31,7 @@ export function Composer({ state, draft, onSend, onInterrupt, onCycleMode }: Pro
   const [error, setError] = useState<string | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
   const mirror = state.mode === 'mirror';
-  const owned = state.mode === 'owned';
+  const attached = state.mode === 'attached';
   const busy = state.status === 'busy';
 
   useEffect(() => {
@@ -58,7 +58,7 @@ export function Composer({ state, draft, onSend, onInterrupt, onCycleMode }: Pro
   };
 
   const placeholder = mirror
-    ? `Running in another terminal${state.elsewhere ? ` (${state.elsewhere})` : ''}. Quit it there to continue here.`
+    ? `View only: this is a plain claude in another terminal${state.elsewhere ? ` (${state.elsewhere})` : ''}.`
     : state.mode === 'history'
       ? 'Continue this session…'
       : state.status === 'waiting'
@@ -106,7 +106,7 @@ export function Composer({ state, draft, onSend, onInterrupt, onCycleMode }: Pro
           <button
             className="chip mode"
             onClick={onCycleMode}
-            disabled={!owned || state.status === 'stopped'}
+            disabled={!attached}
             title="Permission mode (Shift+Tab in the terminal)"
           >
             {MODE_LABEL[state.facts.permissionMode ?? 'default'] ?? state.facts.permissionMode}
@@ -124,10 +124,13 @@ export function Composer({ state, draft, onSend, onInterrupt, onCycleMode }: Pro
       </div>
       <div className="hint">
         {mirror ? (
-          <span>Read-only: this conversation updates live as the other terminal works.</span>
+          <span>
+            Updates live as that terminal works. To drive a session from here and from a terminal, start it with <code>claude --bg</code> or
+            from Companion.
+          </span>
         ) : (
           <>
-            <span>Messages are typed into the same session as the terminal.</span>
+            <span>Same live session as every attached terminal.</span>
             <span>Esc interrupts · ⇧↵ new line</span>
           </>
         )}

@@ -1,7 +1,8 @@
 // Offline end-to-end check of the built app: no login, no model calls. A fake `claude`
 // (fake-claude.mjs) writes transcripts and registry files into an isolated Claude folder.
 // Usage: npm run build && npm run test:e2e   (screenshots land in test/e2e/screenshots/)
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createConnection } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -92,17 +93,50 @@ try {
   await page.locator('.term-pane .xterm-screen').click();
   await page.keyboard.type('typed in xterm');
   await page.keyboard.press('Enter');
-  check('typing in the terminal shows in the conversation', await until(async () => (await thread()).includes('echo: typed in xterm')));
+  check('typing in the terminal pane shows in the conversation', await until(async () => (await thread()).includes('echo: typed in xterm')));
   check('labels it as typed in the terminal', (await thread()).includes('typed in the terminal'));
+
+  // Another terminal (say iTerm, via `claude attach`) joins the same session and types into it.
+  const job = (await page.locator('.crumbs').innerText()).match(/claude attach ([0-9a-f]{8})/)?.[1];
+  check('header shows the attach command for other terminals', !!job);
+  const iterm = createConnection(join(claudeDir, 'fake-socks', `${job}.sock`));
+  await new Promise((r) => iterm.once('connect', r));
+  iterm.write('\x1b[200~typed in iTerm\x1b[201~');
+  await new Promise((r) => setTimeout(r, 100));
+  iterm.write('\r');
+  check('input from another attached terminal shows in the conversation', await until(async () => (await thread()).includes('echo: typed in iTerm')));
+  check("…and in Companion's terminal pane", await until(async () => (await page.locator('.term-pane .xterm-rows').innerText()).includes('echo: typed in iTerm')));
+  await composer.fill('and back from Companion');
+  await composer.press('Enter');
+  let seenByIterm = '';
+  iterm.on('data', (d) => (seenByIterm += d));
+  check('a message sent from Companion reaches the other terminal', await until(async () => seenByIterm.includes('echo: and back from Companion')));
+  iterm.end();
   await page.screenshot({ path: join(shots, '3-split.png') });
 
   await page.getByRole('button', { name: 'End', exact: true }).click();
-  check('ending the session marks it not running', await until(async () => (await status()).includes('Not running')));
+  check('ending the session stops it', await until(async () => (await status()).includes('Not running')));
+
+  await composer.fill('picking this back up');
+  await composer.press('Enter');
+  check('sending to an ended session continues it', await until(async () => (await thread()).includes('echo: picking this back up')));
+  check('and keeps the earlier conversation', (await thread()).includes('echo: typed in iTerm'));
 } catch (err) {
   console.error(err);
   checks.push(['no exceptions', false]);
 } finally {
   await app.close().catch(() => app.process().kill());
+  // Quitting Companion leaves background sessions running, as it should; stop the fake ones.
+  const socks = join(claudeDir, 'fake-socks');
+  for (const f of existsSync(socks) ? readdirSync(socks) : []) {
+    await new Promise((r) => {
+      const c = createConnection(join(socks, f), () => c.end('\x00STOP'));
+      c.resume(); // read to the end, or 'close' never fires
+      c.on('close', r);
+      c.on('error', r);
+      setTimeout(r, 2000);
+    });
+  }
   rmSync(root, { recursive: true, force: true });
 }
 

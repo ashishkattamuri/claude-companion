@@ -18,14 +18,14 @@ const STATUS: Record<string, { label: string; tone: string }> = {
   exited: { label: 'Not running', tone: 'muted' },
 };
 
-export function SessionWorkspace({ sessionId, draft }: { sessionId: string; draft?: string }) {
+export function SessionWorkspace({ sessionId, draft, onError }: { sessionId: string; draft?: string; onError: (m: string) => void }) {
   const view = useSession(sessionId);
   const [mode, setMode] = useState<View>('conversation');
   const [rail, setRail] = useState(true);
   if (!view) return <div className="loading">Loading session…</div>;
   const { state, items } = view;
-  const status = state.mode === 'mirror' ? { label: 'In another terminal', tone: 'green' } : STATUS[state.status]!;
-  const owned = state.mode === 'owned';
+  const status = state.mode === 'mirror' ? { label: 'View only · plain terminal', tone: 'muted' } : STATUS[state.status]!;
+  const running = state.mode === 'attached' || state.mode === 'background';
 
   return (
     <div className={`workspace ${rail ? '' : 'no-rail'}`}>
@@ -40,6 +40,11 @@ export function SessionWorkspace({ sessionId, draft }: { sessionId: string; draf
               <span className="mono">{shortPath(state.cwd)}</span>
               {state.facts.model && <span>{shortModel(state.facts.model)}</span>}
               {state.elsewhere && <span>{state.elsewhere}</span>}
+              {state.jobId && (
+                <span className="mono" title="Run this in any terminal to drive the same session there">
+                  claude attach {state.jobId}
+                </span>
+              )}
             </div>
           </div>
           <div className="head-actions">
@@ -53,10 +58,19 @@ export function SessionWorkspace({ sessionId, draft }: { sessionId: string; draf
             <button className="icon-btn" onClick={() => setRail(!rail)} aria-pressed={rail}>
               Details
             </button>
-            {owned && (
-              <button className="icon-btn" onClick={() => void api.stop(sessionId)} title="End the claude process. You can continue the session later.">
-                End
-              </button>
+            {running && (
+              <>
+                <button
+                  className="icon-btn"
+                  onClick={() => void api.openInTerminal(sessionId).then((r) => !r.ok && onError(r.error))}
+                  title="Open this live session in Terminal or iTerm as well"
+                >
+                  Open in Terminal
+                </button>
+                <button className="icon-btn" onClick={() => void api.stop(sessionId)} title="Stop the session (claude stop). You can continue it later.">
+                  End
+                </button>
+              </>
             )}
           </div>
         </header>
@@ -78,7 +92,7 @@ export function SessionWorkspace({ sessionId, draft }: { sessionId: string; draf
             </div>
           )}
           {mode !== 'conversation' && (
-            <TerminalView sessionId={sessionId} interactive={owned && state.status !== 'stopped'} visible />
+            <TerminalView sessionId={sessionId} interactive={state.mode === 'attached'} visible />
           )}
         </div>
       </section>

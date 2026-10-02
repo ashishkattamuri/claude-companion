@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import * as pty from 'node-pty';
 import { ConversationParser } from '../adapter/conversation.js';
 import type { SessionMode, SessionSnapshot, SessionState } from '../shared/api.js';
+import { findBackground, isAlive, readBackground, type BackgroundEntry } from './background.js';
 import { detectPrompt, Screen } from './screen.js';
 import { TranscriptTail } from './transcript.js';
 
@@ -20,13 +21,7 @@ export interface ChannelDeps {
   env: () => Record<string, string>;
 }
 
-interface Registry {
-  status?: string;
-  waitingFor?: string;
-  sessionId?: string;
-}
-
-interface Proc {
+interface Attachment {
   pty: pty.IPty;
   screen: Screen;
   buffer: string;
@@ -34,31 +29,45 @@ interface Proc {
   exited: boolean;
 }
 
+export interface ChannelInfo {
+  cwd: string | null;
+  title: string;
+  mode: SessionMode;
+  /** Background sessions: the short id `claude attach` takes. */
+  jobId?: string;
+  /** Sessions running in another terminal: the pid to watch. */
+  mirrorPid?: number;
+  /** Messages the app already sent (e.g. a new session's first prompt), to label them correctly. */
+  sentFromApp?: string[];
+}
+
 /**
  * One session as the window sees it. Events: `items` (changed conversation items), `state`,
- * `data` (terminal output chunk + stream offset), `sent` (id of a user message sent from the app).
+ * `data` (terminal output chunk + stream offset), `sent` (id of a user message sent from the app),
+ * `status` (status or mode changed), `ended` (the session's claude process finished).
  *
- * In owned mode the session's `claude` runs in a pseudo-terminal here. The conversation view is
- * rendered from the transcript Claude Code writes, and anything typed in the app is typed into
- * that same terminal, so the two can never disagree.
+ * Sessions run as Claude Code background sessions. Companion's terminal pane is one more
+ * `claude attach` client, next to any terminal you attach yourself, so every attached place can
+ * type into the same live session. The conversation view is rendered from the transcript.
  */
 export class SessionChannel extends EventEmitter {
   readonly parser = new ConversationParser();
   private tail: TranscriptTail;
-  private proc: Proc | null = null;
+  private att: Attachment | null = null;
+  private bg: BackgroundEntry | null = null;
   private timer: NodeJS.Timeout | null = null;
   private queue: string[] = [];
   private awaitingEcho: string[] = [];
   private sentFromApp = new Set<string>();
   private lastStateJson = '';
   private screenDirty = false;
-  private mirrorPid: number | null = null;
+  private mirrorPid: number | null;
   state: SessionState;
 
   constructor(
     readonly sessionId: string,
     private deps: ChannelDeps,
-    info: { cwd: string | null; title: string; mode: SessionMode; mirrorPid?: number },
+    info: ChannelInfo,
   ) {
     super();
     this.tail = new TranscriptTail(deps.projectsDir, sessionId);
@@ -73,9 +82,11 @@ export class SessionChannel extends EventEmitter {
       cwd: info.cwd,
       title: info.title,
       elsewhere: info.mirrorPid ? `pid ${info.mirrorPid}` : null,
+      jobId: info.jobId ?? null,
     };
-    this.parser.push(this.tail.poll());
-    if (info.mode === 'mirror') this.tickMirror();
+    if (info.jobId) this.bg = findBackground(deps.claudeDir, info.jobId);
+    this.awaitingEcho.push(...(info.sentFromApp ?? []));
+    this.tick();
     this.timer = setInterval(() => this.tick(), POLL_MS);
   }
 
@@ -84,19 +95,33 @@ export class SessionChannel extends EventEmitter {
       state: this.state,
       items: this.parser.all(),
       sentFromApp: [...this.sentFromApp],
-      replay: this.proc ? { data: this.proc.buffer, end: this.proc.written } : null,
+      replay: this.att ? { data: this.att.buffer, end: this.att.written } : null,
     };
   }
 
-  get running(): boolean {
-    return !!this.proc && !this.proc.exited;
+  /** Companion's terminal pane is attached and can type into the session. */
+  get attached(): boolean {
+    return !!this.att && !this.att.exited;
   }
 
-  /** Runs claude for this session in a pseudo-terminal. */
-  start(args: string[]): void {
-    if (this.running) return;
-    const proc: Proc = {
-      pty: pty.spawn(this.deps.claudeBin, args, {
+  /** The session's claude process is running in the background (attached here or not). */
+  get alive(): boolean {
+    return !!this.bg;
+  }
+
+  /** A background session was just started or found for this session. */
+  useBackground(entry: BackgroundEntry): void {
+    this.bg = entry;
+    this.mirrorPid = null;
+    this.tail.follow(entry.sessionId);
+    this.update({ mode: 'background', jobId: entry.jobId, elsewhere: null, status: 'starting' });
+  }
+
+  /** Attaches Companion's terminal pane: `claude attach <job>` in a pseudo-terminal. */
+  attach(): void {
+    if (this.attached || !this.bg) return;
+    const att: Attachment = {
+      pty: pty.spawn(this.deps.claudeBin, ['attach', this.bg.jobId], {
         name: 'xterm-256color',
         cols: COLS,
         rows: ROWS,
@@ -108,30 +133,30 @@ export class SessionChannel extends EventEmitter {
       written: 0,
       exited: false,
     };
-    this.proc = proc;
-    this.mirrorPid = null;
-    proc.pty.onData((chunk) => {
-      proc.written += chunk.length;
-      proc.buffer += chunk;
-      if (proc.buffer.length > REPLAY_LIMIT) proc.buffer = proc.buffer.slice(-REPLAY_LIMIT);
-      proc.screen.write(chunk);
+    this.att = att;
+    att.pty.onData((chunk) => {
+      att.written += chunk.length;
+      att.buffer += chunk;
+      if (att.buffer.length > REPLAY_LIMIT) att.buffer = att.buffer.slice(-REPLAY_LIMIT);
+      att.screen.write(chunk);
       this.screenDirty = true;
-      this.emit('data', chunk, proc.written);
+      this.emit('data', chunk, att.written);
     });
-    proc.pty.onExit(() => {
-      proc.exited = true;
-      this.update({ mode: 'history', status: 'stopped', prompt: null });
-      this.emit('exit');
+    att.pty.onExit(() => {
+      att.exited = true;
+      att.screen.dispose();
+      // Detaching leaves a background session running; it just isn't attached here any more.
+      this.update({ mode: this.bg ? 'background' : 'history', prompt: null });
     });
-    this.update({ mode: 'owned', status: 'starting', elsewhere: null });
+    this.update({ mode: 'attached' });
   }
 
-  /** A message given to claude on its command line still came from the app. */
-  expectFromApp(text: string): void {
-    this.awaitingEcho.push(text);
+  /** Closes Companion's terminal pane. The session keeps running. */
+  detach(): void {
+    if (this.attached) this.att!.pty.kill();
   }
 
-  /** Queues a message; it is typed into the terminal as soon as Claude Code can take input. */
+  /** Queues a message; it is typed into the session as soon as Claude Code can take input. */
   send(text: string): void {
     this.queue.push(text);
     this.update({ queued: [...this.queue] });
@@ -139,47 +164,41 @@ export class SessionChannel extends EventEmitter {
   }
 
   answer(key: string): void {
-    const p = this.proc;
-    if (!p || p.exited || !this.state.prompt) return;
+    const a = this.att;
+    if (!a || a.exited || !this.state.prompt) return;
     if (this.state.prompt.kind === 'trust') {
       // The trust menu has no numbers: move to the wanted option, then confirm.
       const wantYes = key === 'yes';
-      const atYes = this.state.prompt.yesSelected;
-      if (wantYes !== atYes) p.pty.write(wantYes ? '\x1b[B' : '\x1b[A');
-      setTimeout(() => p.pty.write('\r'), 60);
+      if (wantYes !== this.state.prompt.yesSelected) a.pty.write(wantYes ? '\x1b[B' : '\x1b[A');
+      setTimeout(() => a.pty.write('\r'), 60);
     } else {
-      p.pty.write(key);
+      a.pty.write(key);
     }
   }
 
   interrupt(): void {
-    if (this.running) this.proc!.pty.write('\x1b');
+    this.write('\x1b');
   }
 
   /** Shift+Tab: Claude Code cycles default → accept edits → plan mode. */
   cyclePermissionMode(): void {
-    if (this.running) this.proc!.pty.write('\x1b[Z');
+    this.write('\x1b[Z');
   }
 
   write(data: string): void {
-    if (this.running) this.proc!.pty.write(data);
+    if (this.attached) this.att!.pty.write(data);
   }
 
   resize(cols: number, rows: number): void {
-    if (!this.running || cols < 10 || rows < 4) return;
-    this.proc!.pty.resize(cols, rows);
-    this.proc!.screen.resize(cols, rows);
-  }
-
-  stop(): void {
-    if (this.running) this.proc!.pty.kill();
+    if (!this.attached || cols < 10 || rows < 4) return;
+    this.att!.pty.resize(cols, rows);
+    this.att!.screen.resize(cols, rows);
   }
 
   dispose(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
-    this.stop();
-    this.proc?.screen.dispose();
+    this.detach();
     this.removeAllListeners();
   }
 
@@ -200,57 +219,59 @@ export class SessionChannel extends EventEmitter {
       if (this.parser.facts.title && this.parser.facts.title !== this.state.title) this.update({ title: this.parser.facts.title });
     }
 
-    if (this.proc && !this.proc.exited) this.tickOwned();
-    else if (this.state.mode === 'mirror') this.tickMirror();
+    if (this.state.mode === 'mirror') this.tickMirror();
+    else if (this.bg) this.tickBackground();
     this.update({ facts: { ...this.parser.facts } });
   }
 
-  private tickOwned(): void {
-    const reg = readRegistry(this.deps.claudeDir, this.proc!.pty.pid);
-    // Resuming can give the session a new id; follow the transcript Claude Code actually writes.
-    if (reg?.sessionId) this.tail.follow(reg.sessionId);
+  private tickBackground(): void {
+    const entry = readBackground(this.deps.claudeDir, this.bg!.pid);
+    if (!entry) {
+      // Stopped, or claude exited inside it.
+      this.bg = null;
+      this.detach();
+      this.update({ mode: 'history', status: 'stopped', prompt: null, jobId: null });
+      this.emit('ended');
+      return;
+    }
+    this.bg = entry;
 
     let prompt = this.state.prompt;
-    if (this.screenDirty) {
+    if (this.attached && this.screenDirty) {
       this.screenDirty = false;
-      const found = detectPrompt(this.proc!.screen.lines());
+      const found = detectPrompt(this.att!.screen.lines());
       // A numbered list in Claude's own reply looks like a menu; only trust it while Claude Code says it's waiting.
-      prompt = found && (found.kind === 'trust' || reg?.status === 'waiting') ? found : null;
-    } else if (prompt && prompt.kind !== 'trust' && reg?.status !== 'waiting') {
+      prompt = found && (found.kind === 'trust' || entry.status === 'waiting') ? found : null;
+    } else if (!this.attached || (prompt && prompt.kind !== 'trust' && entry.status !== 'waiting')) {
       prompt = null;
     }
 
-    const status: SessionState['status'] = prompt
-      ? 'waiting'
-      : reg?.status === 'busy'
-        ? 'busy'
-        : reg?.status === 'waiting'
-          ? 'waiting'
-          : reg?.status === 'idle'
-            ? 'idle'
-            : 'starting';
+    const status: SessionState['status'] =
+      prompt || entry.status === 'waiting' ? 'waiting' : entry.status === 'busy' ? 'busy' : entry.status === 'idle' ? 'idle' : 'starting';
     this.update({ status, prompt });
     this.flush();
   }
 
   private tickMirror(): void {
-    const alive = this.mirrorPid !== null && isAlive(this.mirrorPid);
-    if (!alive) return this.update({ mode: 'history', status: 'stopped', elsewhere: null });
-    const reg = readRegistry(this.deps.claudeDir, this.mirrorPid!);
-    const status = reg?.status === 'busy' ? 'busy' : reg?.status === 'waiting' ? 'waiting' : 'idle';
-    this.update({ status });
+    if (this.mirrorPid === null || !isAlive(this.mirrorPid)) {
+      this.update({ mode: 'history', status: 'stopped', elsewhere: null });
+      this.emit('ended');
+      return;
+    }
+    const status = readStatus(this.deps.claudeDir, this.mirrorPid);
+    this.update({ status: status === 'busy' ? 'busy' : status === 'waiting' ? 'waiting' : 'idle' });
   }
 
   /** Types queued messages once Claude Code shows its input box (registered, no dialog open). */
   private flush(): void {
-    const p = this.proc;
-    if (!p || p.exited || !this.queue.length) return;
+    const a = this.att;
+    if (!a || a.exited || !this.queue.length) return;
     if (this.state.prompt || this.state.status === 'starting') return;
     const text = this.queue.shift()!;
     this.awaitingEcho.push(text);
     // Bracketed paste keeps multi-line messages in one prompt; Enter submits it.
-    p.pty.write(`\x1b[200~${text}\x1b[201~`);
-    setTimeout(() => p.pty.write('\r'), 80);
+    a.pty.write(`\x1b[200~${text}\x1b[201~`);
+    setTimeout(() => a.pty.write('\r'), 80);
     this.update({ queued: [...this.queue] });
   }
 
@@ -267,23 +288,13 @@ export class SessionChannel extends EventEmitter {
   }
 }
 
-function readRegistry(claudeDir: string, pid: number): Registry | null {
+function readStatus(claudeDir: string, pid: number): string | null {
   try {
-    return JSON.parse(readFileSync(join(claudeDir, 'sessions', `${pid}.json`), 'utf8')) as Registry;
+    return JSON.parse(readFileSync(join(claudeDir, 'sessions', `${pid}.json`), 'utf8')).status ?? null;
   } catch {
     return null;
   }
 }
 
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
 const sameText = (a: string, b: string) => squash(a) === squash(b);
-

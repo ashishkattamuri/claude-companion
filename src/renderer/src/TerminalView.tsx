@@ -87,11 +87,11 @@ export function TerminalView({ sessionId, interactive, visible }: { sessionId: s
     <div className="term-pane">
       <div className="term-head">
         <span>claude · {sessionId.slice(0, 8)}</span>
-        {interactive ? <span className="live">same session, live</span> : <span>not running here</span>}
+        {interactive ? <span className="live">attached · same live session</span> : <span>not attached</span>}
       </div>
       <div className="term-host" ref={host} />
       {!hasOutput && !interactive && (
-        <div className="term-empty">The terminal appears here while the session runs in Companion. Send a message to continue it.</div>
+        <div className="term-empty">The terminal appears here once the session is running. Send a message to continue it.</div>
       )}
     </div>
   );

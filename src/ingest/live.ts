@@ -9,6 +9,10 @@ export interface LiveSession {
   status: string;
   name: string | null;
   version: string | null;
+  /** "bg" for background sessions (`claude --bg`), which any terminal can attach to. */
+  kind: string | null;
+  /** Short id that `claude attach` takes; background sessions only. */
+  jobId: string | null;
 }
 
 /**
@@ -43,6 +47,8 @@ export function readLiveSessions(claudeDir: string): LiveSession[] {
       status: e.status ?? 'unknown',
       name: e.name ?? null,
       version: e.version ?? null,
+      kind: e.kind ?? null,
+      jobId: e.jobId ?? null,
     }));
 }
 

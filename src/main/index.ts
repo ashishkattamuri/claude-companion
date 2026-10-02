@@ -53,6 +53,7 @@ app.whenReady().then(() => {
   ipcMain.on('session:interrupt', (_e, id: string) => service.interrupt(id));
   ipcMain.on('session:cycleMode', (_e, id: string) => service.cyclePermissionMode(id));
   ipcMain.handle('session:stop', (_e, id: string) => service.stop(id));
+  ipcMain.handle('session:openInTerminal', (_e, id: string) => service.openInTerminal(id));
   ipcMain.handle('term:replay', (_e, id: string) => service.replay(id));
   ipcMain.on('term:write', (_e, id: string, data: string) => service.write(id, data));
   ipcMain.on('term:resize', (_e, id: string, cols: number, rows: number) => service.resize(id, cols, rows));
@@ -81,27 +82,8 @@ app.whenReady().then(() => {
     win.focus();
   });
 
-  // Closing the app ends its Claude sessions (they can be resumed later), so confirm first.
-  let confirmedQuit = false;
-  app.on('before-quit', (e) => {
-    const running = service.running();
-    if (confirmedQuit || !running.length || !win) {
-      service.disposeAll();
-      return;
-    }
-    e.preventDefault();
-    const choice = dialog.showMessageBoxSync(win, {
-      type: 'warning',
-      buttons: ['Quit', 'Cancel'],
-      defaultId: 1,
-      message: `${running.length} Claude session${running.length > 1 ? 's are' : ' is'} still running.`,
-      detail: 'Quitting ends them. You can continue them later from the session list.',
-    });
-    if (choice === 0) {
-      confirmedQuit = true;
-      app.quit();
-    }
-  });
+  // Sessions are Claude Code background sessions: quitting only detaches, and they keep running.
+  app.on('before-quit', () => service.disposeAll());
 });
 
 app.on('window-all-closed', () => app.quit());

@@ -18,7 +18,7 @@
     "test": "ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs run",
     "test:e2e": "node test/e2e/run.mjs",
     "postinstall": "electron-rebuild -f -w better-sqlite3,node-pty",
-    "test:live": "node test/e2e/live.mjs"
+    "test:live": "ELECTRON_RUN_AS_NODE=1 electron test/e2e/live.mjs"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.3.0",

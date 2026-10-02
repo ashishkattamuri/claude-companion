@@ -21,12 +21,14 @@ export type ScreenPrompt =
     };
 
 /**
- * Who drives the session:
- * - owned: running in this app; the conversation and the terminal can both drive it.
- * - mirror: running in another terminal; shown live, read-only.
- * - history: not running; sending a message continues it here.
+ * How the window can drive the session:
+ * - attached: a Claude Code background session with Companion's terminal attached. Every attached
+ *   terminal (Companion, iTerm via `claude attach`) can type into it.
+ * - background: a background session not attached here yet; sending a message attaches.
+ * - mirror: a plain `claude` running in another terminal; shown live, read-only.
+ * - history: not running; sending a message continues it as a background session.
  */
-export type SessionMode = 'owned' | 'mirror' | 'history';
+export type SessionMode = 'attached' | 'background' | 'mirror' | 'history';
 
 export interface SessionState {
   sessionId: string;
@@ -41,6 +43,8 @@ export interface SessionState {
   title: string;
   /** For mirrors: where the session runs, e.g. "pid 48343". */
   elsewhere: string | null;
+  /** Background sessions: the id for `claude attach <id>`. */
+  jobId: string | null;
 }
 
 export interface SessionSnapshot {
@@ -54,9 +58,10 @@ export interface SessionSnapshot {
 
 export interface SessionListItem extends SessionRow {
   live: LiveSession | null;
-  /** Open (running) in this app. */
-  owned: boolean;
-  /** owned sessions report their own status; mirrors report Claude Code's registry status. */
+  /** A background session: drivable from Companion and any terminal that attaches. */
+  background: boolean;
+  /** Companion's terminal is attached to it right now. */
+  attached: boolean;
   status: SessionState['status'] | null;
 }
 
@@ -91,8 +96,10 @@ export interface CompanionApi {
   answer(sessionId: string, key: string): void;
   interrupt(sessionId: string): void;
   cyclePermissionMode(sessionId: string): void;
-  /** Ends the claude process (the session can be continued later). */
+  /** Stops the session's claude process (`claude stop`). The session can be continued later. */
   stop(sessionId: string): Promise<void>;
+  /** Opens the same live session in Terminal or iTerm (`claude attach <id>`). */
+  openInTerminal(sessionId: string): Promise<Result>;
   pickFolder(): Promise<string | null>;
 
   /** The terminal output so far, for a terminal view that is (re)mounting. */
