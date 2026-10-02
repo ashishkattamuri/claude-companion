@@ -5,14 +5,15 @@ import { currentStatus } from '../analyze/runner.js';
 import { loadConfig } from '../config.js';
 import { readLiveSessions } from '../ingest/live.js';
 import { openDb } from '../store/db.js';
-import type { OpenRequest } from '../shared/api.js';
+import type { NewSessionRequest } from '../shared/api.js';
 import { resolveShellPath, sessionEnv } from './env.js';
-import { PtyManager } from './pty.js';
 import { CompanionService } from './service.js';
 
 const TICK_MS = 5000;
 const TICK_WHILE_ANALYZING_MS = 1500;
 
+// A separate app-data folder lets a test instance run next to your everyday one.
+if (process.env.COMPANION_USER_DATA) app.setPath('userData', process.env.COMPANION_USER_DATA);
 // `companion` run twice focuses the existing window instead of opening a second app.
 if (!app.requestSingleInstanceLock()) app.quit();
 
@@ -21,28 +22,21 @@ let win: BrowserWindow | null = null;
 app.whenReady().then(() => {
   const cfg = loadConfig();
   const db = openDb(cfg.dbPath);
-  const terminals = new PtyManager();
   const shellPath = resolveShellPath();
   const send = (channel: string, ...args: unknown[]) => win?.webContents.send(channel, ...args);
 
   const service = new CompanionService({
     db,
     cfg,
-    terminals,
     llm: new ClaudeCliClient(db, join(dirname(cfg.dbPath), 'run')),
     loadLive: () => readLiveSessions(cfg.claudeDir),
     env: () => sessionEnv(shellPath),
+    analysis: !process.env.COMPANION_NO_ANALYSIS,
+    onItems: (id, items) => send('session:items', id, items),
+    onState: (state) => send('session:state', state),
+    onData: (id, data, end) => send('term:data', id, data, end),
+    onSent: (id, itemId) => send('session:sent', id, itemId),
     onChanged: () => send('changed'),
-  });
-
-  terminals.on('data', (id: string, data: string, end: number) => send('term:data', id, data, end));
-  terminals.on('exit', (id: string, code: number) => {
-    send('term:exit', id, code);
-    // The session just ended: pick up what happened in it.
-    const sessionId = terminals.get(id)?.sessionId;
-    service.refresh();
-    void service.analyze({ endedSessionIds: sessionId ? [sessionId] : [] });
-    send('changed');
   });
 
   ipcMain.handle('sessions:list', (_e, q) => service.listSessions(q ?? {}));
@@ -51,12 +45,17 @@ app.whenReady().then(() => {
   ipcMain.handle('recap:regenerate', () => {
     void service.analyze({ force: true });
   });
-  ipcMain.handle('session:open', (_e, req: OpenRequest) => service.open(req));
-  ipcMain.handle('term:list', () => terminals.list());
-  ipcMain.handle('term:replay', (_e, id: string) => terminals.replay(id));
-  ipcMain.handle('term:close', (_e, id: string) => terminals.close(id));
-  ipcMain.on('term:write', (_e, id: string, data: string) => terminals.write(id, data));
-  ipcMain.on('term:resize', (_e, id: string, cols: number, rows: number) => terminals.resize(id, cols, rows));
+  ipcMain.handle('session:open', (_e, id: string) => service.openSession(id));
+  ipcMain.on('session:close', (_e, id: string) => service.closeSessionView(id));
+  ipcMain.handle('session:new', (_e, req: NewSessionRequest) => service.newSession(req));
+  ipcMain.handle('session:send', (_e, id: string, text: string) => service.send(id, text));
+  ipcMain.on('session:answer', (_e, id: string, key: string) => service.answer(id, key));
+  ipcMain.on('session:interrupt', (_e, id: string) => service.interrupt(id));
+  ipcMain.on('session:cycleMode', (_e, id: string) => service.cyclePermissionMode(id));
+  ipcMain.handle('session:stop', (_e, id: string) => service.stop(id));
+  ipcMain.handle('term:replay', (_e, id: string) => service.replay(id));
+  ipcMain.on('term:write', (_e, id: string, data: string) => service.write(id, data));
+  ipcMain.on('term:resize', (_e, id: string, cols: number, rows: number) => service.resize(id, cols, rows));
   ipcMain.handle('dialog:pickFolder', async () => {
     const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory'] });
     return r.canceled ? null : (r.filePaths[0] ?? null);
@@ -85,9 +84,9 @@ app.whenReady().then(() => {
   // Closing the app ends its Claude sessions (they can be resumed later), so confirm first.
   let confirmedQuit = false;
   app.on('before-quit', (e) => {
-    const running = terminals.running();
+    const running = service.running();
     if (confirmedQuit || !running.length || !win) {
-      terminals.closeAll();
+      service.disposeAll();
       return;
     }
     e.preventDefault();
@@ -96,7 +95,7 @@ app.whenReady().then(() => {
       buttons: ['Quit', 'Cancel'],
       defaultId: 1,
       message: `${running.length} Claude session${running.length > 1 ? 's are' : ' is'} still running.`,
-      detail: 'Quitting ends them. You can resume them later from Sessions.',
+      detail: 'Quitting ends them. You can continue them later from the session list.',
     });
     if (choice === 0) {
       confirmedQuit = true;

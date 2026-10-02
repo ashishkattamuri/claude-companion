@@ -1,179 +1,116 @@
-import { useCallback, useEffect, useState } from 'react';
-import type { OpenRequest, RecapView as Recap, TermInfo } from '../../shared/api';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { NewSessionRequest, RecapView, SessionListItem } from '../../shared/api';
 import { api } from './api';
-import { NewSessionDialog } from './NewSessionDialog';
-import { RecapView } from './RecapView';
-import { SessionsView } from './SessionsView';
-import { TerminalPane } from './TerminalPane';
+import { NewSessionSheet } from './NewSessionSheet';
+import { SessionWorkspace } from './SessionWorkspace';
+import { Sidebar, type Page } from './Sidebar';
+import { sessions as store } from './store';
+import { TodayView } from './TodayView';
 
-type Page = 'today' | 'sessions' | 'ideas' | 'goals' | 'feed' | 'connectors';
-type View = { kind: 'page'; page: Page } | { kind: 'term'; id: string };
+type Selection = { kind: 'page'; page: Page } | { kind: 'session'; id: string; draft?: string };
 
-const PAGES: { id: Page; label: string; soon?: string }[] = [
-  { id: 'today', label: 'Today' },
-  { id: 'sessions', label: 'Sessions' },
-  { id: 'ideas', label: 'Ideas', soon: 'Follow-ups and directions from your conversations, ready to run in one click.' },
-  { id: 'goals', label: 'Goals', soon: 'Long-running goals checked on a schedule that report back only when something changes.' },
-  { id: 'feed', label: 'Feed', soon: 'News related to what you are working on.' },
-  { id: 'connectors', label: 'Connectors', soon: 'GitHub, Linear, Slack and calendar via MCP, enabled when first needed.' },
-];
+const SOON: Record<Exclude<Page, 'today'>, { title: string; text: string }> = {
+  ideas: { title: 'Ideas', text: 'Follow-ups and directions from your conversations, ready to run in one click.' },
+  goals: { title: 'Goals', text: 'Long-running goals checked on a schedule that report back only when something changes.' },
+  feed: { title: 'Feed', text: 'News related to what you are working on.' },
+  connectors: { title: 'Connectors', text: 'GitHub, Linear, Slack and calendar via MCP, enabled when first needed.' },
+};
 
 export function App() {
-  const [view, setView] = useState<View>({ kind: 'page', page: 'today' });
-  const [terms, setTerms] = useState<TermInfo[]>([]);
-  const [recap, setRecap] = useState<Recap | null>(null);
-  const [version, setVersion] = useState(0);
-  const [newSession, setNewSession] = useState<{ cwd?: string } | null>(null);
+  const [selection, setSelection] = useState<Selection>({ kind: 'page', page: 'today' });
+  const [list, setList] = useState<SessionListItem[]>([]);
+  const [search, setSearch] = useState('');
+  const [recap, setRecap] = useState<RecapView | null>(null);
+  const [sheet, setSheet] = useState<{ cwd?: string; prompt?: string } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const openId = useRef<string | null>(null);
 
   const reload = useCallback(() => {
-    setVersion((v) => v + 1);
+    void api.listSessions({ search: search.trim() || undefined }).then(setList);
     void api.getRecap().then(setRecap);
-    void api.listTerminals().then(setTerms);
-  }, []);
+  }, [search]);
 
   useEffect(() => {
     reload();
-    const offChanged = api.onChanged(reload);
-    const offExit = api.onTerminalExit(() => void api.listTerminals().then(setTerms));
-    return () => {
-      offChanged();
-      offExit();
-    };
+    return api.onChanged(reload);
   }, [reload]);
 
   useEffect(() => {
     if (!toast) return;
-    const t = setTimeout(() => setToast(null), 5000);
+    const t = setTimeout(() => setToast(null), 6000);
     return () => clearTimeout(t);
   }, [toast]);
 
-  const open = useCallback(async (req: OpenRequest) => {
-    const r = await api.openSession(req);
-    if (!r.ok) return setToast(r.error);
-    setTerms(await api.listTerminals());
-    setView({ kind: 'term', id: r.term.id });
-  }, []);
+  // Open the selected session's live view; let the previous one go.
+  useEffect(() => {
+    const id = selection.kind === 'session' ? selection.id : null;
+    if (openId.current && openId.current !== id) store.close(openId.current);
+    openId.current = id;
+    if (id) void store.open(id).then((err) => err && setToast(err));
+  }, [selection]);
 
-  const closeTerm = useCallback(
-    async (id: string) => {
-      await api.closeTerminal(id);
-      const remaining = await api.listTerminals();
-      setTerms(remaining);
-      setView((v) => (v.kind === 'term' && v.id === id ? (remaining.at(-1) ? { kind: 'term', id: remaining.at(-1)!.id } : { kind: 'page', page: 'sessions' }) : v));
+  const startSession = useCallback(
+    async (req: NewSessionRequest) => {
+      setSheet(null);
+      const r = await api.newSession(req);
+      if (!r.ok) return setToast(r.error);
+      setSelection({ kind: 'session', id: r.value });
+      reload();
     },
-    [],
+    [reload],
   );
 
-  // ⌘N new session, ⌘W close the current tab, ⌘1–6 pages.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!e.metaKey) return;
-      if (e.key === 'n') {
+      if (e.metaKey && e.key === 'n') {
         e.preventDefault();
-        setNewSession({});
-      } else if (e.key === 'w' && view.kind === 'term') {
-        e.preventDefault();
-        void closeTerm(view.id);
-      } else if (/^[1-6]$/.test(e.key)) {
-        e.preventDefault();
-        setView({ kind: 'page', page: PAGES[Number(e.key) - 1]!.id });
+        setSheet({});
       }
     };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [view, closeTerm]);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
-  const status = recap?.status;
-  const page = view.kind === 'page' ? PAGES.find((p) => p.id === view.page)! : null;
+  const cwdFor = (project: string, sessionId: string) =>
+    list.find((s) => s.id === sessionId)?.cwd ?? list.find((s) => s.project === project)?.cwd ?? undefined;
 
   return (
     <div className="app">
-      <nav className="sidebar">
-        <div className="drag-region">
-          <span className="brand">Companion</span>
-        </div>
-        {PAGES.map((p, i) => (
-          <button
-            key={p.id}
-            className={`nav-item ${view.kind === 'page' && view.page === p.id ? 'active' : ''} ${p.soon ? 'soon' : ''}`}
-            onClick={() => setView({ kind: 'page', page: p.id })}
-            title={`⌘${i + 1}`}
-          >
-            {p.label}
-            {p.soon && <span className="soon-tag">soon</span>}
-          </button>
-        ))}
-
-        <div className="nav-heading">Open sessions</div>
-        {terms.length === 0 && <div className="muted small nav-empty">None yet</div>}
-        {terms.map((t) => (
-          <div key={t.id} className={`nav-item term ${view.kind === 'term' && view.id === t.id ? 'active' : ''}`}>
-            <button className="term-link" onClick={() => setView({ kind: 'term', id: t.id })} title={t.title}>
-              <span className={`dot ${t.exited ? 'none' : 'open'}`} />
-              <span className="ellipsis">{t.title}</span>
-            </button>
-            <button className="icon-btn" onClick={() => void closeTerm(t.id)} title={t.exited ? 'Close' : 'End session'}>
-              ×
-            </button>
-          </div>
-        ))}
-        <button className="nav-item new" onClick={() => setNewSession({})}>
-          + New session <span className="kbd">⌘N</span>
-        </button>
-
-        <div className="sidebar-footer muted small">
-          {status?.state === 'running' ? (
-            <>
-              <span className="spinner" /> {status.step}
-              {status.total ? ` ${status.done}/${status.total}` : ''}
-            </>
-          ) : status?.state === 'paused' ? (
-            'Summaries paused (usage limit)'
-          ) : status?.state === 'error' ? (
-            <span className="error-text">Summaries failed; see Today</span>
-          ) : (
-            'Up to date'
-          )}
-        </div>
-      </nav>
-
-      <main className="main">
-        {page?.id === 'today' && <RecapView data={recap} onOpen={open} onRegenerate={() => void api.regenerateRecap()} />}
-        {page?.id === 'sessions' && (
-          <SessionsView
-            version={version}
-            onOpen={open}
-            onFocusTerm={(id) => setView({ kind: 'term', id })}
-            onNewSession={(cwd) => setNewSession({ cwd })}
+      <Sidebar
+        page={selection.kind === 'page' ? selection.page : null}
+        sessions={list}
+        selectedId={selection.kind === 'session' ? selection.id : null}
+        search={search}
+        onSearch={setSearch}
+        onPage={(page) => setSelection({ kind: 'page', page })}
+        onSelect={(id) => setSelection({ kind: 'session', id })}
+        onNew={() => setSheet({})}
+      />
+      <main className="content">
+        {selection.kind === 'session' && (
+          <SessionWorkspace key={selection.id} sessionId={selection.id} draft={selection.draft} />
+        )}
+        {selection.kind === 'page' && selection.page === 'today' && (
+          <TodayView
+            data={recap}
+            onStart={(project, sessionId, text) => setSheet({ cwd: cwdFor(project, sessionId), prompt: text })}
+            onContinue={(id, text) => setSelection({ kind: 'session', id, draft: text })}
+            onRegenerate={() => void api.regenerateRecap()}
           />
         )}
-        {page?.soon && (
+        {selection.kind === 'page' && selection.page !== 'today' && (
           <div className="page">
             <div className="empty">
-              <h2>{page.label}</h2>
-              <p className="muted">{page.soon}</p>
-              <span className="chip">Coming soon</span>
+              <h2>{SOON[selection.page].title}</h2>
+              <p className="muted">{SOON[selection.page].text}</p>
+              <span className="chip static">Coming soon</span>
             </div>
           </div>
         )}
-        {terms.map((t) => (
-          <TerminalPane key={t.id} term={t} active={view.kind === 'term' && view.id === t.id} onClose={() => void closeTerm(t.id)} />
-        ))}
       </main>
-
-      {newSession && (
-        <NewSessionDialog
-          initialCwd={newSession.cwd}
-          onCancel={() => setNewSession(null)}
-          onStart={(cwd, prompt) => {
-            setNewSession(null);
-            void open({ kind: 'new', cwd, prompt });
-          }}
-        />
-      )}
+      {sheet && <NewSessionSheet initial={sheet} onStart={(req) => void startSession(req)} onCancel={() => setSheet(null)} />}
       {toast && (
-        <div className="toast" onClick={() => setToast(null)}>
+        <div className="toast" role="status" onClick={() => setToast(null)}>
           {toast}
         </div>
       )}

@@ -1,13 +1,16 @@
-import type { OpenRequest, RecapView as Recap } from '../../shared/api';
+import type { RecapView } from '../../shared/api';
 import { greeting } from './format';
 
 interface Props {
-  data: Recap | null;
-  onOpen: (req: OpenRequest) => void;
+  data: RecapView | null;
+  /** Start a new session on an action item. */
+  onStart: (project: string, sessionId: string, text: string) => void;
+  /** Open the session an item came from, with the item ready to send. */
+  onContinue: (sessionId: string, text: string) => void;
   onRegenerate: () => void;
 }
 
-export function RecapView({ data, onOpen, onRegenerate }: Props) {
+export function TodayView({ data, onStart, onContinue, onRegenerate }: Props) {
   const status = data?.status;
   const running = status?.state === 'running';
   const row = data?.recap;
@@ -36,10 +39,7 @@ export function RecapView({ data, onOpen, onRegenerate }: Props) {
       {!row && !running && (
         <div className="empty">
           <h2>No recap yet</h2>
-          <p className="muted">
-            The recap covers your last working day in Claude Code. There was no activity in the past week, or it hasn't
-            been written yet.
-          </p>
+          <p className="muted">The recap covers your last working day in Claude Code. Nothing from the past week has been recapped yet.</p>
         </div>
       )}
 
@@ -47,38 +47,30 @@ export function RecapView({ data, onOpen, onRegenerate }: Props) {
         <>
           <p className="headline">{row.recap.headline}</p>
           <div className="muted small">
-            Covering{' '}
-            {new Date(row.windowStart).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })} ·{' '}
+            Covering {new Date(row.windowStart).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })} ·{' '}
             {row.sessionIds.length} session{row.sessionIds.length === 1 ? '' : 's'} · written{' '}
             {new Date(row.createdAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
           </div>
 
           <h3 className="section">Action items</h3>
           {row.recap.action_items.length === 0 && <p className="muted">Nothing pending.</p>}
-          <div className="cards">
+          <div className="actions-list">
             {row.recap.action_items.map((a, i) => (
-              <article className="card action" key={i}>
-                <div className="row gap">
-                  <span className={`priority ${a.priority}`}>{a.priority}</span>
-                  <span className="chip">{a.project}</span>
+              <article className="action-item" key={i}>
+                <span className={`priority ${a.priority}`}>{a.priority}</span>
+                <div className="action-body">
+                  <p className="action-text">{a.text}</p>
+                  <p className="muted small">
+                    {a.why} · <span className="mono">{a.project}</span>
+                  </p>
                 </div>
-                <p className="action-text">{a.text}</p>
-                <p className="muted small">{a.why}</p>
-                <div className="row gap">
-                  <button
-                    className="btn primary"
-                    onClick={() => onOpen({ kind: 'action', mode: 'new', sessionId: a.session_id, project: a.project, text: a.text })}
-                  >
+                <div className="action-buttons">
+                  <button className="btn primary" onClick={() => onStart(a.project, a.session_id, a.text)}>
                     Start session
                   </button>
                   {a.session_id && (
-                    <button
-                      className="btn ghost"
-                      onClick={() =>
-                        onOpen({ kind: 'action', mode: 'continue', sessionId: a.session_id, project: a.project, text: a.text })
-                      }
-                    >
-                      Continue where I left off
+                    <button className="btn quiet" onClick={() => onContinue(a.session_id, a.text)}>
+                      Continue its session
                     </button>
                   )}
                 </div>
@@ -101,7 +93,7 @@ export function RecapView({ data, onOpen, onRegenerate }: Props) {
           <div className="projects">
             {row.recap.projects.map((p) => (
               <div className="project" key={p.project}>
-                <div className="project-name">{p.project}</div>
+                <div className="project-name mono">{p.project}</div>
                 <p>{p.summary}</p>
               </div>
             ))}

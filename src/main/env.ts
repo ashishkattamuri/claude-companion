@@ -19,12 +19,31 @@ export function resolveShellPath(): string | null {
   }
 }
 
-/** The environment Claude sessions run in: ours, with the login shell's PATH merged in front. */
+/**
+ * Markers that must not leak into sessions we start. Claude Code's own session markers (set when
+ * Companion itself was launched from inside a Claude session) make the child think it is a
+ * subagent: it then skips writing its transcript and registering as live.
+ */
+const DROP = new Set([
+  'ELECTRON_RUN_AS_NODE',
+  'COMPANION_INTERNAL',
+  'CLAUDECODE',
+  'CLAUDE_PID',
+  'CLAUDE_EFFORT',
+  'CLAUDE_CODE_CHILD_SESSION',
+  'CLAUDE_CODE_ENTRYPOINT',
+  'CLAUDE_CODE_EXECPATH',
+  'CLAUDE_CODE_MESSAGING_SOCKET',
+  'CLAUDE_CODE_MESSAGING_TOKEN',
+  'CLAUDE_CODE_SESSION_ATTENDED',
+  'CLAUDE_CODE_SESSION_ID',
+]);
+
+/** The environment Claude sessions run in: ours, minus runtime markers, with the login shell's PATH in front. */
 export function sessionEnv(shellPath: string | null): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
-    // Never leak our runtime switches into the user's sessions.
-    if (v !== undefined && k !== 'ELECTRON_RUN_AS_NODE' && k !== 'COMPANION_INTERNAL') env[k] = v;
+    if (v !== undefined && !DROP.has(k)) env[k] = v;
   }
   if (shellPath) {
     const merged = new Set([...shellPath.split(':'), ...(env.PATH ?? '').split(':')].filter(Boolean));

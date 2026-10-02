@@ -206,7 +206,7 @@ class FileIngester {
 }
 
 /** Reads `[start, end)` and returns only newline-terminated lines, so a half-written last line is retried next scan. */
-function readCompleteLines(path: string, start: number, end: number): { lines: string[]; consumed: number } {
+export function readCompleteLines(path: string, start: number, end: number): { lines: string[]; consumed: number } {
   const length = end - start;
   if (length <= 0) return { lines: [], consumed: 0 };
   const buf = Buffer.alloc(length);

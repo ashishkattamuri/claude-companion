@@ -17,16 +17,22 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p src/renderer",
     "test": "ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs run",
     "test:e2e": "node test/e2e/run.mjs",
-    "postinstall": "electron-rebuild -f -w better-sqlite3,node-pty"
+    "postinstall": "electron-rebuild -f -w better-sqlite3,node-pty",
+    "test:live": "node test/e2e/live.mjs"
   },
   "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
     "@xterm/addon-fit": "^0.11.0",
+    "@xterm/headless": "^6.0.0",
     "@xterm/xterm": "^6.0.0",
     "better-sqlite3": "^13.0.3",
     "commander": "^15.0.0",
     "node-pty": "^1.1.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "smol-toml": "^1.9.0",
     "zod": "^4.6.5"
   },
