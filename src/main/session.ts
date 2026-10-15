@@ -63,6 +63,8 @@ export class SessionChannel extends EventEmitter {
   private lastStateJson = '';
   private screenDirty = false;
   private mirrorPid: number | null;
+  /** Hold messages until Companion's tools have connected (or this deadline passes). */
+  private toolsDeadline = 0;
   state: SessionState;
 
   constructor(
@@ -150,6 +152,20 @@ export class SessionChannel extends EventEmitter {
       this.update({ mode: this.bg ? 'background' : 'history', prompt: null });
     });
     this.update({ mode: 'attached' });
+  }
+
+  /**
+   * The session was started with Companion's tools: hold messages until its MCP server reports in,
+   * so the first message can already use them. Gives up waiting after `ms`.
+   */
+  expectTools(ms = 10_000): void {
+    this.toolsDeadline = Date.now() + ms;
+  }
+
+  toolsReady(): void {
+    if (!this.toolsDeadline) return;
+    this.toolsDeadline = 0;
+    this.flush();
   }
 
   /** Closes Companion's terminal pane. The session keeps running. */
@@ -268,6 +284,7 @@ export class SessionChannel extends EventEmitter {
     const a = this.att;
     if (!a || a.exited || !this.queue.length) return;
     if (this.state.prompt || this.state.status === 'starting') return;
+    if (this.toolsDeadline && Date.now() < this.toolsDeadline) return;
     const text = this.queue.shift()!;
     this.awaitingEcho.push(text);
     // Bracketed paste keeps multi-line messages in one prompt; Enter submits it.

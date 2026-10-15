@@ -42,7 +42,14 @@ export interface SessionFacts {
   costUsd: number | null;
   title: string | null;
   todos: { content: string; status: string }[] | null;
+  /**
+   * Whether Claude has Companion's new-chat tool in this session: true or false once the session
+   * has listed its tools (on its first turn), null before that.
+   */
+  newChatTool: boolean | null;
 }
+
+export const NEW_CHAT_TOOL = 'mcp__companion__start_new_chat';
 
 const MAX_RESULT_CHARS = 20_000;
 
@@ -52,7 +59,7 @@ const HARNESS_PREFIXES = ['<command-', '<local-command', '<system-reminder>', '<
 export class ConversationParser {
   private items: ConversationItem[] = [];
   private byToolUseId = new Map<string, Extract<ConversationItem, { kind: 'tool' }>>();
-  facts: SessionFacts = { model: null, permissionMode: null, contextTokens: null, costUsd: null, title: null, todos: null };
+  facts: SessionFacts = { model: null, permissionMode: null, contextTokens: null, costUsd: null, title: null, todos: null, newChatTool: null };
 
   /** Feeds raw JSONL lines; returns the items that were added or changed. */
   push(lines: string[]): ConversationItem[] {
@@ -93,6 +100,9 @@ export class ConversationParser {
         return [];
       case 'system':
         return this.system(rec, ts);
+      case 'attachment':
+        this.attachment(rec.attachment);
+        return [];
       case 'user':
         return this.user(rec, ts);
       case 'assistant':
@@ -100,6 +110,14 @@ export class ConversationParser {
       default:
         return [];
     }
+  }
+
+  /** Claude Code lists the (deferred) tools a session has; that tells us whether the new-chat tool is there. */
+  private attachment(a: Record<string, any> | undefined): void {
+    if (a?.type !== 'deferred_tools_delta') return;
+    if ((a.addedNames ?? []).includes(NEW_CHAT_TOOL)) this.facts.newChatTool = true;
+    else if ((a.removedNames ?? []).includes(NEW_CHAT_TOOL)) this.facts.newChatTool = false;
+    else if (this.facts.newChatTool === null && (a.addedNames ?? []).length) this.facts.newChatTool = false;
   }
 
   private system(rec: Record<string, any>, ts: string): ConversationItem[] {

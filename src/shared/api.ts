@@ -67,6 +67,8 @@ export interface SessionListItem extends SessionRow {
 
 /** Context tools and links for one session. */
 export interface SessionExtras {
+  /** The new-chat tool is registered for all Claude sessions (`companion tools install`). */
+  toolsEverywhere: boolean;
   notes: { path: string; updatedAt: string; behind: boolean; preview: string } | null;
   notesUpdating: boolean;
   pins: { path: string; label: string }[];
@@ -124,6 +126,10 @@ export interface CompanionApi {
   reloadPins(sessionId: string): Promise<Result>;
   openNotes(sessionId: string): Promise<void>;
   refreshNotes(sessionId: string): Promise<void>;
+  /** Restarts a chat that lacks Companion's tools as a copy that has them (history kept). */
+  restartWithTools(sessionId: string): Promise<Result<string>>;
+  /** Registers the new-chat tool for every Claude session, including ones in a terminal. */
+  installToolsEverywhere(): Promise<Result>;
   /** The app wants to show a session (e.g. a new chat Claude just opened). */
   onNavigate(cb: (sessionId: string, draft?: string) => void): () => void;
 

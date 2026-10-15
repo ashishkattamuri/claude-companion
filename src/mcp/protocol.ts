@@ -18,7 +18,13 @@ export interface NewChatRequest {
   };
 }
 
-export type SocketRequest = NewChatRequest;
+/** Sent by the MCP server once Claude Code has connected to it: the session's tools are ready. */
+export interface HelloRequest {
+  method: 'hello';
+  params: { claudePid: number; sessionId: string | null };
+}
+
+export type SocketRequest = NewChatRequest | HelloRequest;
 export type SocketResponse = { ok: true; message: string } | { ok: false; error: string };
 
 export const socketPath = (cfg: Config) => process.env.COMPANION_SOCKET ?? join(dirname(cfg.dbPath), 'companion.sock');

@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { execFile, spawnSync } from 'node:child_process';
+import { copyFileSync, existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import type { ConversationItem } from '../adapter/conversation.js';
 import type { LlmClient } from '../analyze/llm.js';
-import { notesBehind, readNotes, recentExchanges, updateNotes } from '../analyze/notes.js';
+import { notesBehind, notesPath, readNotes, recentExchanges, updateNotes } from '../analyze/notes.js';
 import { getRecap, recapDay } from '../analyze/recap.js';
 import { analysisNeeded, currentStatus, runJobs } from '../analyze/runner.js';
 import type { Config } from '../config.js';
@@ -51,6 +52,8 @@ export interface ServiceDeps {
 
 const ok: Result = { ok: true, value: undefined };
 const NEW_CHAT_TOOL = 'mcp__companion__start_new_chat';
+/** `claude mcp add` name for the user-scope registration. */
+const MCP_NAME = 'companion';
 
 /**
  * Everything the window can ask for, independent of Electron. The main process wires these
@@ -62,6 +65,12 @@ export class CompanionService {
   private notesTimers = new Map<string, NodeJS.Timeout>();
   private notesRunning = new Map<string, Promise<void>>();
   private mcpConfigPath: string | null = null;
+  /** Restarts in progress, by the session being restarted; resolves to the restarted copy's id. */
+  private restarts = new Map<string, Promise<Result<string>>>();
+  /** Sessions whose Companion tools have connected (their MCP server said hello). */
+  private toolsUp = new Set<string>();
+  private toolsEverywhere: boolean | null = null;
+  private checkingTools = false;
 
   constructor(private d: ServiceDeps) {
     if (d.mcp) {
@@ -102,8 +111,12 @@ export class CompanionService {
         items.push(this.listItem(placeholderRow(l.sessionId, l.cwd, title), l));
       }
     }
+    // A chat restarted as a copy is superseded by the copy; list only the copy.
+    const superseded = new Set(
+      (this.d.db.prepare(`SELECT parent_id FROM session_links WHERE kind = 'restart'`).all() as { parent_id: string }[]).map((r) => r.parent_id),
+    );
     const rank = (s: SessionListItem) => (s.status === 'waiting' ? 3 : s.attached ? 2 : s.live ? 1 : 0);
-    return items.sort((a, b) => rank(b) - rank(a) || (b.lastTs ?? '').localeCompare(a.lastTs ?? ''));
+    return items.filter((s) => !superseded.has(s.id) || s.live).sort((a, b) => rank(b) - rank(a) || (b.lastTs ?? '').localeCompare(a.lastTs ?? ''));
   }
 
   private listItem(row: SessionRow, live: LiveSession | null): SessionListItem {
@@ -178,6 +191,7 @@ export class CompanionService {
       sentFromApp: prompt ? [prompt] : [],
     });
     ch.useBackground(entry);
+    this.awaitTools(ch);
     ch.attach();
     this.d.onChanged?.();
     return { ok: true, value: entry.sessionId };
@@ -185,6 +199,12 @@ export class CompanionService {
 
   async send(sessionId: string, text: string): Promise<Result> {
     if (!text.trim()) return { ok: false, error: 'Nothing to send.' };
+    // Typed while the chat is restarting: it belongs to the restarted copy.
+    const restarting = this.restarts.get(sessionId);
+    if (restarting) {
+      const r = await restarting;
+      if (r.ok && r.value !== sessionId) return this.send(r.value, text);
+    }
     const opened = this.openSession(sessionId);
     if (!opened.ok) return opened;
     const ch = this.channels.get(sessionId)!;
@@ -203,6 +223,7 @@ export class CompanionService {
       } catch (err) {
         return { ok: false, error: `Could not continue the session: ${(err as Error).message}` };
       }
+      if (ch.state.facts.newChatTool || this.toolsEverywhere) this.awaitTools(ch);
       this.d.onChanged?.();
     }
     ch.attach();
@@ -255,6 +276,13 @@ export class CompanionService {
 
   /** Requests from Companion's MCP server inside a session (Claude calling the new-chat tool). */
   async handleSocket(req: SocketRequest): Promise<SocketResponse> {
+    if (req.method === 'hello') {
+      if (req.params.sessionId) {
+        this.toolsUp.add(req.params.sessionId);
+        this.channels.get(req.params.sessionId)?.toolsReady();
+      }
+      return { ok: true, message: 'hello' };
+    }
     if (req.method !== 'new_chat') return { ok: false, error: 'Unknown request.' };
     const parentId = req.params.sessionId;
     if (!parentId) return { ok: false, error: 'Could not tell which chat the request came from.' };
@@ -307,6 +335,7 @@ export class CompanionService {
     for (const pin of this.pins(parentId)) this.pinFile(entry.sessionId, pin);
     const ch = this.channel(entry.sessionId, { cwd, title: opts.title, mode: 'history' });
     ch.useBackground(entry);
+    this.awaitTools(ch);
     ch.attach();
     this.d.onChanged?.();
     this.d.onNavigate?.(entry.sessionId, opts.prompt);
@@ -321,6 +350,102 @@ export class CompanionService {
       title: `Continued: ${title}`.slice(0, 80),
       prompt: "Let's pick up where we left off. What's the next step?",
     });
+  }
+
+  // ── Making the new-chat tool available ───────────────────────────────────────────────────────
+
+  /**
+   * Restarts a chat so it has Companion's tools. Claude Code keeps a background session's original
+   * options on resume, so resuming with our flags starts a copy of the conversation (full history)
+   * that has them. The window switches to the copy; the old one is listed no more.
+   */
+  restartWithTools(sessionId: string): Promise<Result<string>> {
+    const running = this.restarts.get(sessionId);
+    if (running) return running;
+    const p = this.doRestart(sessionId).finally(() => this.restarts.delete(sessionId));
+    this.restarts.set(sessionId, p);
+    return p;
+  }
+
+  private async doRestart(sessionId: string): Promise<Result<string>> {
+    const ch = this.channels.get(sessionId);
+    const cwd = this.cwdOf(sessionId);
+    if (ch?.state.mode === 'mirror') return { ok: false, error: 'This chat runs in another terminal; restart it there.' };
+    if (!cwd || !existsSync(cwd)) return { ok: false, error: 'The project folder was not found.' };
+    if (ch?.state.jobId) await stopBackground(this.channelDeps, ch.state.jobId);
+    let entry;
+    try {
+      entry = await startBackground(this.channelDeps, cwd, ['--resume', sessionId, ...this.launchArgs()]);
+    } catch (err) {
+      return { ok: false, error: `Could not restart the chat: ${(err as Error).message}` };
+    }
+    if (entry.sessionId === sessionId) {
+      ch?.useBackground(entry);
+      if (ch) this.awaitTools(ch);
+      ch?.attach();
+      this.d.onChanged?.();
+      return { ok: true, value: sessionId };
+    }
+    const title = getSession(this.d.db, sessionId)?.title ?? ch?.state.title ?? 'Chat';
+    this.d.db
+      .prepare(`INSERT OR REPLACE INTO session_links(child_id, parent_id, title, kind, created_at) VALUES (?, ?, ?, 'restart', ?)`)
+      .run(entry.sessionId, sessionId, title, new Date().toISOString());
+    for (const pin of this.pins(sessionId)) this.pinFile(entry.sessionId, pin);
+    const notes = readNotes(this.d.db, sessionId);
+    if (notes) {
+      const path = notesPath(this.d.cfg, entry.sessionId);
+      copyFileSync(notes.path, path);
+      this.d.db
+        .prepare(`INSERT OR REPLACE INTO session_notes(session_id, covers_until, path, model, updated_at) VALUES (?, ?, ?, NULL, ?)`)
+        .run(entry.sessionId, notes.coversUntil, path, notes.updatedAt);
+    }
+    const copy = this.channel(entry.sessionId, { cwd, title, mode: 'history' });
+    copy.useBackground(entry);
+    this.awaitTools(copy);
+    copy.attach();
+    this.closeSessionView(sessionId);
+    this.d.onChanged?.();
+    this.d.onNavigate?.(entry.sessionId);
+    return { ok: true, value: entry.sessionId };
+  }
+
+  /** Hold the session's first messages until its tools connect, unless they already have. */
+  private awaitTools(ch: SessionChannel): void {
+    if (!this.toolsUp.has(ch.sessionId)) ch.expectTools();
+  }
+
+  /**
+   * Whether the new-chat tool is registered for all Claude sessions (`claude mcp add --scope user`).
+   * `claude mcp get` takes a moment (it connects to the server), so it runs in the background and
+   * the answer is cached; until then this reports false.
+   */
+  toolsInstalledEverywhere(): boolean {
+    if (this.toolsEverywhere === null && !this.checkingTools) {
+      this.checkingTools = true;
+      execFile(this.channelDeps.claudeBin, ['mcp', 'get', MCP_NAME], { env: this.d.env(), timeout: 20_000 }, (err) => {
+        this.checkingTools = false;
+        this.toolsEverywhere = !err;
+        this.d.onChanged?.();
+      });
+    }
+    return this.toolsEverywhere ?? false;
+  }
+
+  /** Registers the new-chat tool for every Claude session, including ones started in a terminal. */
+  installToolsEverywhere(): Result {
+    if (!this.d.mcp) return { ok: false, error: 'Not available in this build.' };
+    const env = Object.entries(this.d.mcp.env)
+      .filter(([k]) => k === 'ELECTRON_RUN_AS_NODE')
+      .flatMap(([k, v]) => ['-e', `${k}=${v}`]);
+    const r = spawnSync(
+      this.channelDeps.claudeBin,
+      ['mcp', 'add', '--scope', 'user', MCP_NAME, ...env, '--', this.d.mcp.command, ...this.d.mcp.args],
+      { env: this.d.env(), encoding: 'utf8', timeout: 15_000 },
+    );
+    this.toolsEverywhere = null;
+    if (r.status !== 0) return { ok: false, error: `claude mcp add failed: ${(r.stderr || r.stdout).trim().split('\n')[0]}` };
+    this.d.onChanged?.();
+    return ok;
   }
 
   // ── Context tools ────────────────────────────────────────────────────────────────────────────
@@ -373,6 +498,7 @@ export class CompanionService {
       .prepare(`SELECT child_id AS id, title, kind FROM session_links WHERE parent_id = ? ORDER BY created_at`)
       .all(sessionId) as { id: string; title: string; kind: string }[];
     return {
+      toolsEverywhere: this.toolsInstalledEverywhere(),
       notes: notes ? { path: notes.path, updatedAt: notes.updatedAt, behind: notesBehind(this.d.db, sessionId), preview: notes.text.slice(0, 1200) } : null,
       notesUpdating: this.notesRunning.has(sessionId),
       pins: this.pins(sessionId).map((path) => ({ path, label: this.display(sessionId, path) })),

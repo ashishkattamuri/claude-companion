@@ -201,6 +201,10 @@ h1, h2 { text-wrap: balance; }
 .btn.quiet { border-color: transparent; background: transparent; color: var(--muted); }
 .btn.quiet:hover { color: var(--ink); }
 
+/* Notice: chat without the new-chat tool */
+.tool-notice { max-width: 780px; margin: 0 auto; width: calc(100% - 48px); display: flex; flex-direction: column; gap: 8px; padding: 10px 14px; border: 1px solid var(--line); border-left: 3px solid var(--amber); border-radius: 10px; background: var(--raised); font-size: 13px; }
+.tool-notice-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
 /* Composer */
 .composer { padding: 8px 24px 16px; }
 .composer-error { max-width: 780px; margin: 0 auto 6px; font-size: 12.5px; color: var(--red); }

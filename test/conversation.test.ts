@@ -59,6 +59,21 @@ describe('ConversationParser', () => {
     ]);
   });
 
+  it("knows whether the session has Companion's new-chat tool", () => {
+    const delta = (added: string[], removed: string[] = []) =>
+      line({ type: 'attachment', attachment: { type: 'deferred_tools_delta', addedNames: added, removedNames: removed } });
+    const without = new ConversationParser();
+    expect(without.facts.newChatTool).toBeNull();
+    without.push([delta(['WebSearch', 'mcp__other__x'])]);
+    expect(without.facts.newChatTool).toBe(false);
+
+    const withTool = new ConversationParser();
+    withTool.push([delta(['WebSearch']), delta(['mcp__companion__start_new_chat'])]);
+    expect(withTool.facts.newChatTool).toBe(true);
+    withTool.push([delta([], ['mcp__companion__start_new_chat'])]);
+    expect(withTool.facts.newChatTool).toBe(false);
+  });
+
   it('records the latest todo list for the side panel', () => {
     const p = new ConversationParser();
     const todos = [{ content: 'Write tests', status: 'in_progress' }];

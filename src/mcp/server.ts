@@ -13,7 +13,28 @@ import { sendRequest, socketPath } from './protocol.js';
  * from Companion and from any attached terminal alike.
  */
 export async function runMcpServer(cfg: Config): Promise<void> {
-  await createMcpServer(cfg).connect(new StdioServerTransport());
+  const server = createMcpServer(cfg);
+  // Claude Code connects to MCP servers in the background as a session starts; until it has, the
+  // session can't see the tool. Tell Companion once it has, so it holds messages until then.
+  server.server.oninitialized = () => {
+    void sendRequest(socketPath(cfg), { method: 'hello', params: { claudePid: process.ppid, sessionId: sessionIdFor(cfg, process.ppid) } }, 3000);
+  };
+  const transport = new StdioServerTransport();
+  // Debugging aid: COMPANION_MCP_LOG=<file> records when Claude Code talks to this server.
+  if (process.env.COMPANION_MCP_LOG) {
+    const t0 = Date.now();
+    const { appendFileSync } = await import('node:fs');
+    const log = (m: string) => appendFileSync(process.env.COMPANION_MCP_LOG!, `${((Date.now() - t0) / 1000).toFixed(1)}s ${m}\n`);
+    log('started');
+    await server.connect(transport);
+    const onmessage = transport.onmessage;
+    transport.onmessage = (msg) => {
+      log(`<- ${'method' in msg ? msg.method : 'response'}`);
+      onmessage?.(msg);
+    };
+    return;
+  }
+  await server.connect(transport);
 }
 
 export function createMcpServer(cfg: Config, callerPid = process.ppid): McpServer {

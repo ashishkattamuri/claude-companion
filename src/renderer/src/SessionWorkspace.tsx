@@ -6,6 +6,7 @@ import { DetailsRail, useExtras } from './DetailsRail';
 import { shortPath } from './format';
 import { useSession } from './store';
 import { TerminalView } from './TerminalView';
+import { ToolNotice } from './ToolNotice';
 
 type View = 'conversation' | 'split' | 'terminal';
 
@@ -95,6 +96,7 @@ export function SessionWorkspace({
           {mode !== 'terminal' && (
             <div className="convo-pane">
               <Conversation items={items} state={state} sentFromApp={view.sentFromApp} onAnswer={(key) => api.answer(sessionId, key)} />
+              <ToolNotice state={state} toolsEverywhere={extras?.toolsEverywhere ?? false} onError={onError} />
               <Composer
                 state={state}
                 draft={draft}

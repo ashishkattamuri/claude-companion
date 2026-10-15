@@ -7,7 +7,7 @@
 // and shows a numbered permission menu for prompts containing "needs-approval".
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +17,7 @@ const socketFor = (job) => join(claudeDir, 'fake-socks', `${job}.sock`);
 const [cmd, ...rest] = process.argv.slice(2);
 
 if (cmd === '--bg') startDaemon(rest);
+else if (cmd === 'mcp') mcp(rest);
 else if (cmd === 'attach') attach(rest[0]);
 else if (cmd === 'stop') stop(rest[0]);
 else if (cmd === '__daemon') runDaemon(rest);
@@ -25,9 +26,33 @@ else {
   process.exit(2);
 }
 
+// `claude mcp add|get|remove`, enough for the user-scope registration.
+function mcp([sub, ...args]) {
+  const file = join(claudeDir, 'fake-mcp.json');
+  const servers = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
+  // The name is the first argument that isn't an option or an option's value.
+  const name = args.find((a, i) => !a.startsWith('-') && !['--scope', '-s', '-e', '--env'].includes(args[i - 1]));
+  if (sub === 'add') servers[name] = args;
+  if (sub === 'remove') delete servers[args.at(-1)];
+  if (sub === 'get' && !servers[args[0]]) {
+    console.error(`No MCP server named "${args[0]}".`);
+    process.exit(1);
+  }
+  mkdirSync(claudeDir, { recursive: true });
+  writeFileSync(file, JSON.stringify(servers));
+}
+
 function startDaemon(args) {
   const resume = args.includes('--resume') ? args[args.indexOf('--resume') + 1] : null;
-  const sessionId = resume ?? randomUUID();
+  // Like Claude Code: resuming a session with extra flags starts a copy, under a new id.
+  const copy = resume && args.length > 2;
+  const sessionId = copy ? randomUUID() : (resume ?? randomUUID());
+  if (copy) {
+    const dir = join(claudeDir, 'projects', process.cwd().replace(/[^a-zA-Z0-9]/g, '-'));
+    const from = join(dir, `${resume}.jsonl`);
+    if (existsSync(from)) writeFileSync(join(dir, `${sessionId}.jsonl`), readFileSync(from, 'utf8').replaceAll(resume, sessionId));
+    console.log(`note: started a copy of that conversation as ${sessionId.slice(0, 8)}.`);
+  }
   const job = sessionId.slice(0, 8);
   const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '__daemon', sessionId, ...args], {
     cwd: process.cwd(),
@@ -99,7 +124,15 @@ function runDaemon([sessionId, ...args]) {
   let pending = null;
   let line = '';
 
+  // Like Claude Code, list the session's tools on its first turn: Companion's tool is there only
+  // when the session was started with Companion's MCP config, or it's registered for all sessions.
+  let listedTools = false;
+  const hasTool = args.includes('--mcp-config') || existsSync(join(claudeDir, 'fake-mcp.json')) && readFileSync(join(claudeDir, 'fake-mcp.json'), 'utf8').includes('companion');
   async function handle(prompt) {
+    if (!listedTools) {
+      listedTools = true;
+      record({ type: 'attachment', attachment: { type: 'deferred_tools_delta', addedNames: ['WebSearch', ...(hasTool ? ['mcp__companion__start_new_chat'] : [])], removedNames: [] } });
+    }
     record({ type: 'user', message: { role: 'user', content: prompt } });
     out(`\n> ${prompt}\n`);
     status('busy');
@@ -166,5 +199,12 @@ function runDaemon([sessionId, ...args]) {
   out(`Fake Claude Code · session ${sessionId}\n\n❯ `);
   if (!args.includes('--resume')) record({ type: 'permission-mode', permissionMode: 'default' });
   status('idle');
+  // A real session's Companion MCP server says hello once Claude Code has connected to it.
+  if (hasTool && process.env.COMPANION_SOCKET) {
+    setTimeout(() => {
+      const c = createConnection(process.env.COMPANION_SOCKET, () => c.end(`${JSON.stringify({ method: 'hello', params: { claudePid: process.pid, sessionId } })}\n`));
+      c.on('error', () => {});
+    }, 300);
+  }
   if (initialPrompt) void handle(initialPrompt);
 }
