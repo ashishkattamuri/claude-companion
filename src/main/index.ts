@@ -4,8 +4,10 @@ import { ClaudeCliClient } from '../analyze/llm.js';
 import { currentStatus } from '../analyze/runner.js';
 import { loadConfig } from '../config.js';
 import { readLiveSessions } from '../ingest/live.js';
+import { socketPath } from '../mcp/protocol.js';
 import { openDb } from '../store/db.js';
 import type { NewSessionRequest } from '../shared/api.js';
+import { listenForSessions } from './app-socket.js';
 import { resolveShellPath, sessionEnv } from './env.js';
 import { CompanionService } from './service.js';
 
@@ -32,6 +34,23 @@ app.whenReady().then(() => {
     loadLive: () => readLiveSessions(cfg.claudeDir),
     env: () => sessionEnv(shellPath),
     analysis: !process.env.COMPANION_NO_ANALYSIS,
+    notes: !process.env.COMPANION_NO_NOTES,
+    notesDelayMs: process.env.COMPANION_NOTES_DELAY_MS ? Number(process.env.COMPANION_NOTES_DELAY_MS) : undefined,
+    // Companion's MCP server runs from the built CLI on Electron's Node, inside each session it starts.
+    mcp: {
+      command: process.execPath,
+      args: [join(app.getAppPath(), 'dist', 'cli.js'), 'mcp'],
+      env: {
+        ELECTRON_RUN_AS_NODE: '1',
+        COMPANION_SOCKET: socketPath(cfg),
+        ...(process.env.COMPANION_CONFIG ? { COMPANION_CONFIG: process.env.COMPANION_CONFIG } : {}),
+        ...(process.env.COMPANION_DB ? { COMPANION_DB: process.env.COMPANION_DB } : {}),
+      },
+    },
+    onNavigate: (id, draft) => {
+      win?.show();
+      send('navigate', id, draft);
+    },
     onItems: (id, items) => send('session:items', id, items),
     onState: (state) => send('session:state', state),
     onData: (id, data, end) => send('term:data', id, data, end),
@@ -57,6 +76,24 @@ app.whenReady().then(() => {
   ipcMain.handle('term:replay', (_e, id: string) => service.replay(id));
   ipcMain.on('term:write', (_e, id: string, data: string) => service.write(id, data));
   ipcMain.on('term:resize', (_e, id: string, cols: number, rows: number) => service.resize(id, cols, rows));
+  ipcMain.handle('session:extras', (_e, id: string) => service.extras(id));
+  ipcMain.handle('session:compact', (_e, id: string, focus: string) => service.compact(id, focus));
+  ipcMain.handle('session:handOff', (_e, id: string) => service.handOff(id));
+  ipcMain.handle('session:pin', (_e, id: string, path: string) => service.pinFile(id, path));
+  ipcMain.handle('session:unpin', (_e, id: string, path: string) => service.unpinFile(id, path));
+  ipcMain.handle('session:reloadPins', (_e, id: string) => service.reloadPins(id));
+  ipcMain.handle('session:refreshNotes', (_e, id: string) => service.refreshNotes(id));
+  ipcMain.handle('session:openNotes', async (_e, id: string) => {
+    const path = service.notesPath(id);
+    if (path) await shell.openPath(path);
+  });
+  ipcMain.handle('dialog:pickFile', async (_e, id: string) => {
+    const r = await dialog.showOpenDialog(win!, { properties: ['openFile'], defaultPath: service.cwdOf(id) ?? undefined });
+    return r.canceled ? null : (r.filePaths[0] ?? null);
+  });
+  // Claude calling the new-chat tool reaches us here, through Companion's MCP server.
+  listenForSessions(socketPath(cfg), (req) => service.handleSocket(req));
+
   ipcMain.handle('dialog:pickFolder', async () => {
     const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory'] });
     return r.canceled ? null : (r.filePaths[0] ?? null);

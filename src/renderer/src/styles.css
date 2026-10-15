@@ -243,6 +243,21 @@ button.chip:hover:not(:disabled) { color: var(--ink); }
 .file { display: flex; justify-content: space-between; gap: 8px; font: 12px var(--mono); padding: 2px 0; }
 .kv { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size: 12.5px; color: var(--muted); }
 .kv > :nth-child(even) { color: var(--ink); text-align: right; max-width: 140px; }
+.rail-warn { font-size: 12px; color: var(--amber); margin: 0 0 4px; }
+.ctx-tools { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.rail-input { width: 100%; font-size: 12.5px; padding: 6px 9px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); outline: none; }
+.rail-input:focus { border-color: var(--accent); }
+.rail-buttons { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin-top: 6px; }
+.btn.small { padding: 4px 10px; font-size: 12px; }
+.notes-preview { margin: 8px 0 0; padding: 8px 10px; max-height: 260px; overflow: auto; font: 11.5px/1.45 var(--mono); white-space: pre-wrap; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; color: var(--muted); }
+.file-right { display: inline-flex; gap: 6px; align-items: center; }
+.icon-pin, .icon-x { border: 0; background: none; padding: 0 2px; font-size: 11px; color: var(--faint); opacity: 0; }
+.file:hover .icon-pin, .file .icon-x { opacity: 1; }
+.icon-x:hover { color: var(--red); }
+.from-link, .child-link { display: block; width: 100%; text-align: left; border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 7px 10px; font-size: 12.5px; color: var(--muted); }
+.from-link:hover, .child-link:hover { border-color: var(--accent); color: var(--ink); }
+.child-link + .child-link { margin-top: 6px; }
+.crumb-link { border: 0; background: none; padding: 0; font-size: 12px; color: var(--accent); }
 .later { font-size: 12px; color: var(--muted); border: 1px dashed var(--line); border-radius: 8px; padding: 8px 10px; }
 
 /* Today */

@@ -114,4 +114,32 @@ export const MIGRATIONS: string[] = [
     error       TEXT
   );
   `,
+  `
+  -- Living notes per session: the important points and specifics, kept current as the session goes.
+  CREATE TABLE session_notes (
+    session_id   TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    covers_until TEXT NOT NULL,   -- timestamp of the last message the notes account for
+    path         TEXT NOT NULL,   -- the .md file
+    model        TEXT,
+    updated_at   TEXT NOT NULL
+  );
+
+  -- A chat opened from another one ("let's discuss this in a separate chat", or a hand-off).
+  CREATE TABLE session_links (
+    child_id   TEXT PRIMARY KEY,
+    parent_id  TEXT NOT NULL,
+    title      TEXT NOT NULL,
+    kind       TEXT NOT NULL,     -- branch | handoff
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX session_links_parent ON session_links(parent_id);
+
+  -- Files you pinned as essential to a session: kept through compaction and handed to new chats.
+  CREATE TABLE session_pins (
+    session_id TEXT NOT NULL,
+    path       TEXT NOT NULL,
+    pinned_at  TEXT NOT NULL,
+    PRIMARY KEY (session_id, path)
+  );
+  `,
 ];

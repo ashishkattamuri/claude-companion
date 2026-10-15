@@ -34,7 +34,7 @@ companion doctor   # check paths, data, live sessions, model usage and transcrip
 companion hooks install   # optional: refresh summaries whenever a Claude Code session ends
 ```
 
-For development, `npm run dev` starts the app with hot reload. `npm test` runs the unit tests, `npm run test:e2e` drives the built app with Playwright and a fake `claude` (offline, free), and `npm run test:live` does the same against the real Claude Code CLI on Haiku, including a second attached terminal (a few cents).
+For development, `npm run dev` starts the app with hot reload. `npm test` runs the unit tests, `npm run test:e2e` drives the built app with Playwright and a fake `claude` (offline, free), and `npm run test:live` does the same against the real Claude Code CLI on Haiku, including a second attached terminal (a few cents). `npm run test:live-branch` checks notes and new chats against the real CLI.
 
 **Today** shows yesterday's work by project, blockers and action items. "Start session" opens a new Claude session on an item; "Continue where I left off" resumes the session it came from.
 
@@ -45,6 +45,12 @@ Sessions run as Claude Code **background sessions** (`claude --bg`), which Claud
 When Claude asks for permission, the same prompt appears as a card in the conversation; answer it there or in any attached terminal. **End** stops the session (`claude stop`); sending a message later continues it. Quitting Companion only detaches, so running sessions keep going.
 
 Sessions started as a plain `claude` in another terminal can only be typed into from that terminal, so Companion shows them live but view-only. Start them with `claude --bg` (then `claude attach <id>`) to drive them from both places.
+
+**New chats from a conversation.** Say it in plain words, in Companion or an attached terminal: *"let's brainstorm this in a separate chat"*. Claude opens the new chat through a tool Companion gives the sessions it starts. The new chat starts clean: it knows the earlier conversation as hidden background (it is never shown in the new chat, and survives resumes), and opens with its first message ready for you to edit and send. The two chats link to each other.
+
+**Session notes.** After each turn, once the session has been quiet for a moment, Companion updates a Markdown notes file for the session (`~/.local/share/claude-companion/notes/<session>.md`) with the goal, decisions, specifics (paths, commands, values, errors and fixes), constraints and open questions. Each update is one small Haiku call on what changed. New chats start from these notes, so they open instantly.
+
+**Context tools** (in the Details panel): the context-window meter warns when it's getting full; **Compact** runs `/compact` with an optional focus; **Pinned files** are kept through compacting, handed to new chats, and can be re-read on demand; **Hand off to a fresh session** opens a new session that picks up from this one's notes.
 
 Shortcuts: `⌘N` new session, `Enter` send, `⇧Enter` new line, `Esc` interrupt Claude.
 

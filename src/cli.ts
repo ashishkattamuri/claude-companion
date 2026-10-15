@@ -179,6 +179,14 @@ hooks
     console.log(s.installed ? `Installed: ${s.command}` : 'Not installed. Run `companion hooks install`.');
   });
 
+// Started by Claude Code inside sessions Companion launches (via --mcp-config): the new-chat tool.
+program
+  .command('mcp', { hidden: true })
+  .action(async () => {
+    const { runMcpServer } = await import('./mcp/server.js');
+    await runMcpServer(loadConfig());
+  });
+
 // Called by Claude Code's SessionEnd hook. Must return quickly and never fail the user's session.
 program
   .command('hook', { hidden: true })
@@ -193,4 +201,6 @@ program
     }
   });
 
-await program.parseAsync();
+// The CLI runs on Electron's Node (ELECTRON_RUN_AS_NODE), where commander would otherwise assume
+// Electron's argument layout and misread the command; the arguments are laid out as in Node.
+await program.parseAsync(process.argv, { from: 'node' });

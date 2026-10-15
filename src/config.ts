@@ -30,6 +30,7 @@ const ConfigSchema = z.object({
       digest: z.string().default('haiku'),
       recap: z.string().default('sonnet'),
       ideas: z.string().default('sonnet'),
+      notes: z.string().default('haiku'),
     })
     .prefault({}),
   limits: z

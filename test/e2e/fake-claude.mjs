@@ -59,7 +59,18 @@ function stop(job) {
 
 function runDaemon([sessionId, ...args]) {
   const job = sessionId.slice(0, 8);
-  const flags = new Set(['--model', '--permission-mode', '--resume']);
+  const flags = new Set([
+    '--model',
+    '--permission-mode',
+    '--resume',
+    '--mcp-config',
+    '--allowedTools',
+    '--system-prompt-snapshot',
+    '--append-system-prompt',
+  ]);
+  // Tests check what a session was started with (e.g. the hidden context of a new chat).
+  mkdirSync(join(claudeDir, 'fake-args'), { recursive: true });
+  writeFileSync(join(claudeDir, 'fake-args', `${sessionId}.json`), JSON.stringify(args));
   const initialPrompt = args.find((a, i) => !a.startsWith('--') && !flags.has(args[i - 1]));
   const cwd = process.cwd();
   const projectDir = join(claudeDir, 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'));

@@ -44,7 +44,8 @@ export interface ChannelInfo {
 /**
  * One session as the window sees it. Events: `items` (changed conversation items), `state`,
  * `data` (terminal output chunk + stream offset), `sent` (id of a user message sent from the app),
- * `status` (status or mode changed), `ended` (the session's claude process finished).
+ * `status` (status or mode changed), `turnEnded` (Claude finished a turn), `ended` (the session's
+ * claude process finished).
  *
  * Sessions run as Claude Code background sessions. Companion's terminal pane is one more
  * `claude attach` client, next to any terminal you attach yourself, so every attached place can
@@ -281,10 +282,13 @@ export class SessionChannel extends EventEmitter {
     if (json === this.lastStateJson) return;
     this.lastStateJson = json;
     const statusChanged = next.status !== this.state.status || next.mode !== this.state.mode;
+    // Claude finished a turn: a good moment to bring the session's notes up to date.
+    const turnEnded = (this.state.status === 'busy' || this.state.status === 'waiting') && next.status !== 'busy' && next.status !== 'waiting';
     this.state = next;
     this.emit('state', next);
     // The session list shows status too (e.g. "needs you"), so let it refresh.
     if (statusChanged) this.emit('status');
+    if (turnEnded) this.emit('turnEnded');
   }
 }
 

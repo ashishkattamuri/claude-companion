@@ -18,11 +18,13 @@
     "test": "ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs run",
     "test:e2e": "node test/e2e/run.mjs",
     "postinstall": "electron-rebuild -f -w better-sqlite3,node-pty",
-    "test:live": "ELECTRON_RUN_AS_NODE=1 electron test/e2e/live.mjs"
+    "test:live": "ELECTRON_RUN_AS_NODE=1 electron test/e2e/live.mjs",
+    "test:live-branch": "ELECTRON_RUN_AS_NODE=1 electron test/e2e/live-branch.mjs"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.3.0",
     "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/headless": "^6.0.0",
     "@xterm/xterm": "^6.0.0",

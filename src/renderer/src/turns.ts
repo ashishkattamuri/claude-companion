@@ -92,6 +92,8 @@ export function describeTool(t: Tool, cwd: string | null): ToolView {
       return { verb: 'Proposed a plan', target: '', added: 0, removed: 0, file: null };
     case 'Skill':
       return { verb: v('Used skill', 'Using skill'), target: String(i.skill ?? ''), added: 0, removed: 0, file: null };
+    case 'mcp__companion__start_new_chat':
+      return { verb: v('Opened a new chat', 'Opening a new chat'), target: String(i.title ?? ''), added: 0, removed: 0, file: null };
     default: {
       const mcp = t.name.match(/^mcp__(.+?)__(.+)$/);
       if (mcp) return { verb: v('Used', 'Using'), target: `${mcp[2]} (${mcp[1]})`, added: 0, removed: 0, file: null };
@@ -123,11 +125,15 @@ export function summarizeSteps(steps: ConversationItem[]): string {
   const edited = count(['Edit', 'MultiEdit', 'Write', 'NotebookEdit']);
   const ran = count(['Bash']);
   const searched = count(['Grep', 'Glob', 'WebSearch', 'WebFetch']);
+  const chats = count(['mcp__companion__start_new_chat']);
+  // Looking up deferred tools is plumbing, not a step worth naming.
+  const plumbing = count(['ToolSearch']);
   if (read) parts.push(`read ${read} file${read > 1 ? 's' : ''}`);
   if (edited) parts.push(`changed ${edited} file${edited > 1 ? 's' : ''}`);
   if (ran) parts.push(`ran ${ran} command${ran > 1 ? 's' : ''}`);
   if (searched) parts.push(`searched ${searched}×`);
-  const other = tools.length - read - edited - ran - searched;
+  if (chats) parts.push(chats > 1 ? `opened ${chats} new chats` : 'opened a new chat');
+  const other = tools.length - read - edited - ran - searched - chats - plumbing;
   if (other) parts.push(`${other} other`);
   return parts.join(', ');
 }

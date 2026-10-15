@@ -38,6 +38,8 @@ const env = {
   COMPANION_DB: join(root, 'data/db.sqlite'),
   COMPANION_CLAUDE_BIN: fake,
   COMPANION_NO_ANALYSIS: '1',
+  COMPANION_NO_NOTES: '1',
+  COMPANION_SOCKET: join(root, 'app.sock'),
   COMPANION_USER_DATA: join(root, 'user-data'),
   FAKE_CLAUDE_DIR: claudeDir,
 };
@@ -56,6 +58,17 @@ const until = async (fn, ms = 10000) => {
   }
   return false;
 };
+
+// The built CLI runs on Electron's Node: the launcher, and the MCP server Claude sessions start.
+{
+  const { spawnSync } = await import('node:child_process');
+  const launcher = spawnSync(process.execPath, [join(repo, 'bin/companion.js'), '--help'], { encoding: 'utf8', env });
+  check('the companion command runs on Electron\'s Node', launcher.status === 0 && launcher.stdout.includes('scan'));
+  const electronBin = (await import('node:module')).createRequire(import.meta.url)('electron');
+  const init = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}\n';
+  const mcp = spawnSync(electronBin, [join(repo, 'dist/cli.js'), 'mcp'], { input: init, encoding: 'utf8', env: { ...env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 15000 });
+  check('the MCP server starts and answers', mcp.stdout.includes('"name":"companion"'));
+}
 
 const app = await electron.launch({ args: [repo], env });
 try {
@@ -121,6 +134,53 @@ try {
   await composer.press('Enter');
   check('sending to an ended session continues it', await until(async () => (await thread()).includes('echo: picking this back up')));
   check('and keeps the earlier conversation', (await thread()).includes('echo: typed in iTerm'));
+
+  // Claude calls the new-chat tool ("let's discuss this in a separate chat"): the request reaches
+  // the app through its socket, exactly as Companion's MCP server sends it.
+  const parentJob = (await page.locator('.crumbs').innerText()).match(/claude attach ([0-9a-f]{8})/)?.[1];
+  const parentId = readdirSync(join(claudeDir, 'sessions'))
+    .map((f) => JSON.parse(readFileSync(join(claudeDir, 'sessions', f), 'utf8')))
+    .find((r) => r.jobId === parentJob)?.sessionId;
+  const reply = await new Promise((resolve) => {
+    const c = createConnection(join(root, 'app.sock'), () =>
+      c.write(`${JSON.stringify({ method: 'new_chat', params: { claudePid: 1, sessionId: parentId, title: 'Brainstorm caching', prompt: 'Let us brainstorm the caching idea.' } })}\n`),
+    );
+    let buf = '';
+    c.on('data', (d) => (buf += d));
+    c.on('end', () => resolve(JSON.parse(buf)));
+  });
+  check('the new-chat request succeeds', reply.ok === true);
+  check('the app switches to the new chat', await until(async () => (await page.locator('.head h1').innerText()).includes('Brainstorm caching')));
+  check('its opening message is prefilled, not sent', (await composer.inputValue()) === 'Let us brainstorm the caching idea.');
+  check('the new chat starts clean', !(await thread()).includes('echo:'));
+  check('it links back to where it came from', (await page.locator('.crumbs').innerText()).includes('from'));
+  const childId = (await page.locator('.crumbs').innerText()).match(/claude attach ([0-9a-f]{8})/)?.[1];
+  const childArgs = readdirSync(join(claudeDir, 'fake-args'))
+    .filter((f) => f.startsWith(childId))
+    .map((f) => JSON.parse(readFileSync(join(claudeDir, 'fake-args', f), 'utf8')))[0] ?? [];
+  const hidden = childArgs[childArgs.indexOf('--append-system-prompt') + 1] ?? '';
+  check('the earlier conversation is passed as hidden context', hidden.includes('echo: picking this back up') && childArgs.includes('--system-prompt-snapshot'));
+  check('sessions get the new-chat tool', childArgs.includes('--mcp-config') && childArgs.includes('mcp__companion__start_new_chat'));
+  await composer.press('Enter');
+  check('sending the prefilled message works', await until(async () => (await thread()).includes('echo: Let us brainstorm the caching idea.')));
+  await page.screenshot({ path: join(shots, '4-new-chat.png') });
+
+  await page.locator('.from-link').click();
+  check('the sidebar shows the new chat by its title', (await page.locator('.sessions').innerText()).includes('Brainstorm caching'));
+  check('the original chat lists the new one', await until(async () => (await page.locator('.rail').innerText()).includes('Brainstorm caching')));
+
+  // Context tools on the original chat: pin a file, compact with a focus, hand off.
+  writeFileSync(join(project, 'notes.md'), 'design notes');
+  await page.evaluate(([id, f]) => window.companion.pinFile(id, f), [parentId, join(project, 'notes.md')]);
+  check('a pinned file shows in the panel', await until(async () => (await page.locator('.rail').innerText()).includes('notes.md')));
+  await page.fill(`#compact-focus-${parentId}`, 'keep the API shape');
+  await page.getByRole('button', { name: 'Compact', exact: true }).click();
+  check('compact sends /compact with the focus and pinned files', await until(async () => (await thread()).includes('/compact keep the API shape Keep full details about these pinned files: notes.md')));
+  await page.getByRole('button', { name: 'Hand off to a fresh session' }).click();
+  check('hand off opens a fresh session from this one', await until(async () => (await page.locator('.head h1').innerText()).startsWith('Continued:')));
+  check('…with a starting message prefilled', (await composer.inputValue()).includes('pick up where we left off'));
+  check('…and the pinned file carried over', await until(async () => (await page.locator('.rail').innerText()).includes('notes.md')));
+  await page.screenshot({ path: join(shots, '5-context-tools.png') });
 } catch (err) {
   console.error(err);
   checks.push(['no exceptions', false]);

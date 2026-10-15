@@ -28,7 +28,7 @@ export interface ProjectRow {
 
 const SESSION_COLUMNS = `
   s.id, s.cwd, p.name AS project, s.project_id AS projectId, s.git_branch AS gitBranch,
-  COALESCE(s.title, s.name, s.last_prompt,
+  COALESCE(s.title, l.title, s.name, s.last_prompt,
            (SELECT text FROM messages m WHERE m.session_id = s.id AND m.kind = 'prompt' ORDER BY ts LIMIT 1),
            '(untitled)') AS title,
   s.last_prompt AS lastPrompt, s.first_ts AS firstTs, s.last_ts AS lastTs,
@@ -65,6 +65,7 @@ export function listSessions(
       `SELECT ${SESSION_COLUMNS} FROM sessions s
        LEFT JOIN projects p ON p.id = s.project_id
        LEFT JOIN session_digests d ON d.session_id = s.id
+       LEFT JOIN session_links l ON l.child_id = s.id
        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
        ORDER BY s.last_ts DESC LIMIT @limit`,
     )

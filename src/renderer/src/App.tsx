@@ -35,6 +35,16 @@ export function App() {
     return api.onChanged(reload);
   }, [reload]);
 
+  // Claude opened a new chat (or a hand-off started): show it, with its opening message ready.
+  useEffect(
+    () =>
+      api.onNavigate((id, draft) => {
+        setSelection({ kind: 'session', id, draft });
+        reload();
+      }),
+    [reload],
+  );
+
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 6000);
@@ -88,7 +98,13 @@ export function App() {
       />
       <main className="content">
         {selection.kind === 'session' && (
-          <SessionWorkspace key={selection.id} sessionId={selection.id} draft={selection.draft} onError={setToast} />
+          <SessionWorkspace
+            key={selection.id}
+            sessionId={selection.id}
+            draft={selection.draft}
+            onError={setToast}
+            onNavigate={(id) => setSelection({ kind: 'session', id })}
+          />
         )}
         {selection.kind === 'page' && selection.page === 'today' && (
           <TodayView

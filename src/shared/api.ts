@@ -65,6 +65,17 @@ export interface SessionListItem extends SessionRow {
   status: SessionState['status'] | null;
 }
 
+/** Context tools and links for one session. */
+export interface SessionExtras {
+  notes: { path: string; updatedAt: string; behind: boolean; preview: string } | null;
+  notesUpdating: boolean;
+  pins: { path: string; label: string }[];
+  /** The chat this one was opened from. */
+  parent: { id: string; title: string; kind: string } | null;
+  /** Chats opened from this one. */
+  children: { id: string; title: string; kind: string }[];
+}
+
 export interface RecapView {
   recap: RecapRow | null;
   status: AnalyzerStatus | null;
@@ -101,6 +112,20 @@ export interface CompanionApi {
   /** Opens the same live session in Terminal or iTerm (`claude attach <id>`). */
   openInTerminal(sessionId: string): Promise<Result>;
   pickFolder(): Promise<string | null>;
+
+  getExtras(sessionId: string): Promise<SessionExtras>;
+  /** Runs /compact, keeping pinned files and the optional focus. */
+  compact(sessionId: string, focus: string): Promise<Result>;
+  /** Opens a fresh session that picks up from this one's notes. */
+  handOff(sessionId: string): Promise<Result<string>>;
+  pickFile(sessionId: string): Promise<string | null>;
+  pinFile(sessionId: string, path: string): Promise<void>;
+  unpinFile(sessionId: string, path: string): Promise<void>;
+  reloadPins(sessionId: string): Promise<Result>;
+  openNotes(sessionId: string): Promise<void>;
+  refreshNotes(sessionId: string): Promise<void>;
+  /** The app wants to show a session (e.g. a new chat Claude just opened). */
+  onNavigate(cb: (sessionId: string, draft?: string) => void): () => void;
 
   /** The terminal output so far, for a terminal view that is (re)mounting. */
   replayTerminal(sessionId: string): Promise<{ data: string; end: number } | null>;

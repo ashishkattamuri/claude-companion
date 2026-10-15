@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api } from './api';
 import { Composer, shortModel } from './Composer';
 import { Conversation } from './Conversation';
-import { DetailsRail } from './DetailsRail';
+import { DetailsRail, useExtras } from './DetailsRail';
 import { shortPath } from './format';
 import { useSession } from './store';
 import { TerminalView } from './TerminalView';
@@ -18,8 +18,19 @@ const STATUS: Record<string, { label: string; tone: string }> = {
   exited: { label: 'Not running', tone: 'muted' },
 };
 
-export function SessionWorkspace({ sessionId, draft, onError }: { sessionId: string; draft?: string; onError: (m: string) => void }) {
+export function SessionWorkspace({
+  sessionId,
+  draft,
+  onError,
+  onNavigate,
+}: {
+  sessionId: string;
+  draft?: string;
+  onError: (m: string) => void;
+  onNavigate: (sessionId: string) => void;
+}) {
   const view = useSession(sessionId);
+  const extras = useExtras(sessionId);
   const [mode, setMode] = useState<View>('conversation');
   const [rail, setRail] = useState(true);
   if (!view) return <div className="loading">Loading session…</div>;
@@ -40,6 +51,11 @@ export function SessionWorkspace({ sessionId, draft, onError }: { sessionId: str
               <span className="mono">{shortPath(state.cwd)}</span>
               {state.facts.model && <span>{shortModel(state.facts.model)}</span>}
               {state.elsewhere && <span>{state.elsewhere}</span>}
+              {extras?.parent && (
+                <button className="crumb-link" onClick={() => onNavigate(extras.parent!.id)}>
+                  ↖ from {extras.parent.title}
+                </button>
+              )}
               {state.jobId && (
                 <span className="mono" title="Run this in any terminal to drive the same session there">
                   claude attach {state.jobId}
@@ -96,7 +112,7 @@ export function SessionWorkspace({ sessionId, draft, onError }: { sessionId: str
           )}
         </div>
       </section>
-      {rail && <DetailsRail state={state} items={items} />}
+      {rail && <DetailsRail state={state} items={items} extras={extras} onNavigate={onNavigate} onError={onError} />}
     </div>
   );
 }

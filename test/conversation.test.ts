@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ConversationParser } from '../src/adapter/conversation.js';
 import { detectPrompt } from '../src/main/screen.js';
-import { describeTool, toTurns } from '../src/renderer/src/turns.js';
+import { describeTool, summarizeSteps, toTurns } from '../src/renderer/src/turns.js';
 
 const line = (o: Record<string, unknown>) => JSON.stringify(o);
 const user = (uuid: string, content: unknown, extra: Record<string, unknown> = {}) =>
@@ -138,6 +138,17 @@ describe('turns', () => {
     expect(first!.answer.map((s) => s.id)).toEqual(['a3']);
     expect(second!.steps).toEqual([]);
     expect(second!.answer.map((s) => s.id)).toEqual(['a4']);
+  });
+
+  it('names new chats in a step summary and leaves tool lookups out', () => {
+    const p = new ConversationParser();
+    p.push([
+      assistant('a1', { type: 'tool_use', id: 't1', name: 'ToolSearch', input: { query: 'new chat' } }),
+      assistant('a2', { type: 'tool_use', id: 't2', name: 'mcp__companion__start_new_chat', input: { title: 'Caching', prompt: 'p' } }),
+    ]);
+    expect(summarizeSteps(p.all())).toBe('opened a new chat');
+    const tool = p.all()[1] as Extract<ReturnType<ConversationParser['all']>[number], { kind: 'tool' }>;
+    expect(describeTool(tool, null)).toMatchObject({ verb: 'Opening a new chat', target: 'Caching' });
   });
 
   it('describes tool calls in plain words, with paths relative to the project', () => {
