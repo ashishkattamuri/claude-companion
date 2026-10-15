@@ -60,6 +60,7 @@ try {
   await page.keyboard.press('Meta+n');
   await page.selectOption('#ns-project', repo);
   await page.selectOption('#ns-model', 'haiku');
+  await page.selectOption('#ns-mode', 'default');
   await page.fill('#ns-prompt', 'Remember these facts for later: the cache uses Redis with a 300 second TTL, and the project codename is PELICAN-42. Reply with just: OK');
   await page.keyboard.press('Meta+Enter');
   check('the first chat replies', await until(async () => /\bOK\b/.test(await lastReply())));
@@ -75,10 +76,11 @@ try {
   await composer.press('Enter');
   check('Claude opens a new chat and Companion switches to it', await until(async () => (await page.locator('.head h1').innerText()) !== parentTitle && (await page.locator('.crumbs').innerText()).includes('from')));
   jobs.add(await job());
-  check('the opening message is prefilled', await until(async () => (await composer.inputValue()).length > 10, 10000));
-  console.log(`  prefilled: "${await composer.inputValue()}"`);
-  check('the new chat shows none of the earlier conversation', !(await thread()).includes('PELICAN'));
-  check('the opening message does not repeat the background', !(await composer.inputValue()).includes('PELICAN'));
+  check('the new chat starts on its opening message right away', await until(async () => (await page.locator('.u-msg').count()) >= 1 && (await page.locator('.a-text').count()) >= 1));
+  const opening = await page.locator('.u-msg .u-text').first().innerText();
+  console.log(`  opening message: "${opening}"`);
+  check('the opening message does not repeat the background', !opening.includes('PELICAN'));
+  check('the new chat shows none of the earlier notes', !(await thread()).includes('earlier_conversation_notes'));
   await shot('2-new-chat');
 
   await composer.fill('Quick check: what were the project codename and the cache TTL from our earlier chat? One line.');
@@ -107,8 +109,7 @@ try {
   iterm.write("\x1b[200~We're choosing between REST and GraphQL. Let's discuss the issues with these approaches in a separate chat.\x1b[201~");
   await new Promise((r) => setTimeout(r, 400));
   iterm.write('\r');
-  check('asking in a plain terminal opens the new chat in Companion', await until(async () => (await page.locator('.head h1').innerText()) !== before && (await composer.inputValue()).length > 10, 120000));
-  console.log(`  prefilled: "${await composer.inputValue()}"`);
+  check('asking in a plain terminal opens the new chat in Companion', await until(async () => (await page.locator('.head h1').innerText()) !== before && (await page.locator('.u-msg').count()) >= 1, 120000));
   jobs.add(await job());
   await shot('5-from-terminal');
   iterm.kill();
@@ -133,7 +134,7 @@ try {
   const copyTitle = await page.locator('.head h1').innerText();
   await composer.fill("Let's discuss rollback strategies for this deploy in a separate chat.");
   await composer.press('Enter');
-  check('after the restart, asking opens a new chat', await until(async () => (await page.locator('.head h1').innerText()) !== copyTitle && (await composer.inputValue()).length > 10, 120000));
+  check('after the restart, asking opens a new chat', await until(async () => (await page.locator('.head h1').innerText()) !== copyTitle && (await page.locator('.u-msg').count()) >= 1, 120000));
   jobs.add(await job());
   await composer.fill('What was the deploy target from the earlier chat? Just the name.');
   await composer.press('Enter');

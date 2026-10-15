@@ -47,7 +47,7 @@ export function createMcpServer(cfg: Config, callerPid = process.ppid): McpServe
       description:
         'Open a separate, fresh chat for a topic, when the user asks to discuss, brainstorm or continue something ' +
         'in a different/separate/new chat or session. The new chat starts with this conversation\'s notes as ' +
-        'hidden background context, and opens with your prompt ready for the user to edit and send. ' +
+        'hidden background context, and starts working on your prompt right away. ' +
         'Do not use it unless the user asked for a separate chat.',
       inputSchema: {
         title: z.string().describe('Short title for the new chat, 3-8 words'),

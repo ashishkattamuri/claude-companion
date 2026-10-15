@@ -84,19 +84,23 @@ function stop(job) {
 
 function runDaemon([sessionId, ...args]) {
   const job = sessionId.slice(0, 8);
-  const flags = new Set([
-    '--model',
-    '--permission-mode',
-    '--resume',
-    '--mcp-config',
-    '--allowedTools',
-    '--system-prompt-snapshot',
-    '--append-system-prompt',
-  ]);
+  // Parse options the way the real CLI does: --allowedTools takes every value up to the next
+  // option, so a prompt right after it is swallowed unless `--` ends the options.
+  const oneValue = new Set(['--model', '--permission-mode', '--resume', '--mcp-config', '--system-prompt-snapshot', '--append-system-prompt']);
+  let initialPrompt;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--') {
+      initialPrompt = args[i + 1];
+      break;
+    }
+    if (oneValue.has(a)) i++;
+    else if (a === '--allowedTools') while (args[i + 1] && !args[i + 1].startsWith('-')) i++;
+    else if (!a.startsWith('-')) initialPrompt = a;
+  }
   // Tests check what a session was started with (e.g. the hidden context of a new chat).
   mkdirSync(join(claudeDir, 'fake-args'), { recursive: true });
   writeFileSync(join(claudeDir, 'fake-args', `${sessionId}.json`), JSON.stringify(args));
-  const initialPrompt = args.find((a, i) => !a.startsWith('--') && !flags.has(args[i - 1]));
   const cwd = process.cwd();
   const projectDir = join(claudeDir, 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'));
   const transcript = join(projectDir, `${sessionId}.jsonl`);

@@ -177,7 +177,9 @@ export class CompanionService {
     if (req.model) args.push('--model', req.model);
     if (req.permissionMode && req.permissionMode !== 'default') args.push('--permission-mode', req.permissionMode);
     if (req.worktree) args.push('--worktree');
-    if (prompt) args.push(prompt);
+    // `--` ends the options: --allowedTools takes several values and --worktree an optional one,
+    // so a prompt right after them would be swallowed as a tool or worktree name.
+    if (prompt) args.push('--', prompt);
     let entry;
     try {
       entry = await startBackground(this.channelDeps, req.cwd, args);
@@ -290,7 +292,7 @@ export class CompanionService {
     return r.ok
       ? {
           ok: true,
-          message: `Opened a new chat "${req.params.title}" in Companion and switched the user to it, with your opening message ready for them to edit and send. Nothing else to do here; just tell the user it's open.`,
+          message: `Opened a new chat "${req.params.title}" in Companion, started it on your opening message, and switched the user to it. Nothing else to do here; just tell the user it's open.`,
         }
       : { ok: false, error: r.error };
   }
@@ -298,7 +300,7 @@ export class CompanionService {
   /**
    * Opens a fresh chat from `parentId`: a new background session in the same folder, given the
    * parent's notes (plus any exchanges the notes don't cover yet) as hidden background context.
-   * The window switches to it with `prompt` ready in the composer.
+   * The new chat starts working on `prompt` right away, and the window switches to it.
    */
   async branch(parentId: string, opts: { kind: 'branch' | 'handoff'; title: string; prompt: string }): Promise<Result<string>> {
     this.refresh();
@@ -325,6 +327,9 @@ export class CompanionService {
         'on',
         '--append-system-prompt',
         context,
+        // The new chat starts on its opening message right away.
+        '--',
+        opts.prompt,
       ]);
     } catch (err) {
       return { ok: false, error: `Could not start the new chat: ${(err as Error).message}` };
@@ -333,12 +338,12 @@ export class CompanionService {
       .prepare(`INSERT OR REPLACE INTO session_links(child_id, parent_id, title, kind, created_at) VALUES (?, ?, ?, ?, ?)`)
       .run(entry.sessionId, parentId, opts.title, opts.kind, new Date().toISOString());
     for (const pin of this.pins(parentId)) this.pinFile(entry.sessionId, pin);
-    const ch = this.channel(entry.sessionId, { cwd, title: opts.title, mode: 'history' });
+    const ch = this.channel(entry.sessionId, { cwd, title: opts.title, mode: 'history', sentFromApp: [opts.prompt] });
     ch.useBackground(entry);
     this.awaitTools(ch);
     ch.attach();
     this.d.onChanged?.();
-    this.d.onNavigate?.(entry.sessionId, opts.prompt);
+    this.d.onNavigate?.(entry.sessionId);
     return { ok: true, value: entry.sessionId };
   }
 

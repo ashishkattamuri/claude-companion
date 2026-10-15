@@ -151,8 +151,9 @@ try {
   });
   check('the new-chat request succeeds', reply.ok === true);
   check('the app switches to the new chat', await until(async () => (await page.locator('.head h1').innerText()).includes('Brainstorm caching')));
-  check('its opening message is prefilled, not sent', (await composer.inputValue()) === 'Let us brainstorm the caching idea.');
-  check('the new chat starts clean', !(await thread()).includes('echo:'));
+  check('it starts on its opening message right away', await until(async () => (await thread()).includes('echo: Let us brainstorm the caching idea.')));
+  check('…labelled as sent from Companion', (await thread()).includes('from Companion'));
+  check('the new chat starts clean', !(await thread()).includes('echo: hello from the sheet'));
   check('it links back to where it came from', (await page.locator('.crumbs').innerText()).includes('from'));
   const childId = (await page.locator('.crumbs').innerText()).match(/claude attach ([0-9a-f]{8})/)?.[1];
   const childArgs = readdirSync(join(claudeDir, 'fake-args'))
@@ -161,8 +162,6 @@ try {
   const hidden = childArgs[childArgs.indexOf('--append-system-prompt') + 1] ?? '';
   check('the earlier conversation is passed as hidden context', hidden.includes('echo: picking this back up') && childArgs.includes('--system-prompt-snapshot'));
   check('sessions get the new-chat tool', childArgs.includes('--mcp-config') && childArgs.includes('mcp__companion__start_new_chat'));
-  await composer.press('Enter');
-  check('sending the prefilled message works', await until(async () => (await thread()).includes('echo: Let us brainstorm the caching idea.')));
   await page.screenshot({ path: join(shots, '4-new-chat.png') });
 
   await page.locator('.from-link').click();
@@ -178,7 +177,7 @@ try {
   check('compact sends /compact with the focus and pinned files', await until(async () => (await thread()).includes('/compact keep the API shape Keep full details about these pinned files: notes.md')));
   await page.getByRole('button', { name: 'Hand off to a fresh session' }).click();
   check('hand off opens a fresh session from this one', await until(async () => (await page.locator('.head h1').innerText()).startsWith('Continued:')));
-  check('…with a starting message prefilled', (await composer.inputValue()).includes('pick up where we left off'));
+  check('…and starts on it right away', await until(async () => (await thread()).includes('echo: Let\'s pick up where we left off')));
   check('…and the pinned file carried over', await until(async () => (await page.locator('.rail').innerText()).includes('notes.md')));
   await page.screenshot({ path: join(shots, '5-context-tools.png') });
 
