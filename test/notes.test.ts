@@ -134,6 +134,7 @@ describe('new-chat tool', () => {
 
   it('tells Claude when Companion is not running', async () => {
     process.env.COMPANION_SOCKET = join(root, 'nobody.sock');
+    process.env.COMPANION_NO_AUTOLAUNCH = '1';
     try {
       const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
       await createMcpServer(cfg, 1).connect(serverSide);

@@ -7,7 +7,12 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:f
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import { writeFileSync } from 'node:fs';
 import { _electron as electron } from 'playwright';
+
+const require = createRequire(import.meta.url);
+const pty = require('node-pty');
 
 const repo = fileURLToPath(new URL('../..', import.meta.url)).replace(/\/$/, '');
 const shots = join(repo, 'test/e2e/screenshots');
@@ -85,6 +90,27 @@ try {
   check('the original chat shows the step', await until(async () => /opened a new chat/i.test(await thread())));
   check('…and links to the new chat', await until(async () => /chats opened from here/i.test(await page.locator('.rail').innerText()), 15000));
   await shot('4-original');
+
+  // A plain `claude` in another terminal (as in iTerm), with Companion's tool registered the way
+  // `companion tools install` does it. Asking there opens the new chat in Companion.
+  const mcpConfig = join(scratch, 'user-mcp.json');
+  writeFileSync(mcpConfig, JSON.stringify({ mcpServers: { companion: { command: require('electron'), args: [join(repo, 'dist/cli.js'), 'mcp'], env: { ELECTRON_RUN_AS_NODE: '1', COMPANION_DB: db } } } }));
+  const before = await page.locator('.head h1').innerText();
+  const iterm = pty.spawn('claude', ['--model', 'haiku', '--mcp-config', mcpConfig, '--allowedTools', 'mcp__companion__start_new_chat'], {
+    cols: 120, rows: 40, cwd: repo, env: { ...cleanEnv, TERM: 'xterm-256color' },
+  });
+  let screen = '';
+  iterm.onData((d) => (screen += d));
+  await until(async () => /❯/.test(screen), 30000);
+  await new Promise((r) => setTimeout(r, 1500));
+  iterm.write("\x1b[200~We're choosing between REST and GraphQL. Let's discuss the issues with these approaches in a separate chat.\x1b[201~");
+  await new Promise((r) => setTimeout(r, 400));
+  iterm.write('\r');
+  check('asking in a plain terminal opens the new chat in Companion', await until(async () => (await page.locator('.head h1').innerText()) !== before && (await composer.inputValue()).length > 10, 120000));
+  console.log(`  prefilled: "${await composer.inputValue()}"`);
+  jobs.add(await job());
+  await shot('5-from-terminal');
+  iterm.kill();
 } catch (err) {
   console.error(err);
   checks.push(['no exceptions', false]);

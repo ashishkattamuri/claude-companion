@@ -1,5 +1,6 @@
+import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -40,10 +41,15 @@ export function createMcpServer(cfg: Config, callerPid = process.ppid): McpServe
     },
     async ({ title, prompt }) => {
       const claudePid = callerPid;
-      const r = await sendRequest(socketPath(cfg), {
-        method: 'new_chat',
-        params: { claudePid, sessionId: sessionIdFor(cfg, claudePid), title, prompt },
-      });
+      const req = { method: 'new_chat' as const, params: { claudePid, sessionId: sessionIdFor(cfg, claudePid), title, prompt } };
+      let r = await sendRequest(socketPath(cfg), req);
+      // Asked from a terminal while Companion is closed: open it, then try again.
+      if (!r.ok && r.error === 'Companion is not running.' && launchApp()) {
+        for (let i = 0; i < 30 && !r.ok; i++) {
+          await new Promise((res) => setTimeout(res, 500));
+          r = await sendRequest(socketPath(cfg), req);
+        }
+      }
       const text = r.ok
         ? r.message
         : `Could not open the new chat: ${r.error} Tell the user, and suggest opening Companion and asking again.`;
@@ -52,6 +58,15 @@ export function createMcpServer(cfg: Config, callerPid = process.ppid): McpServe
   );
 
   return server;
+}
+
+/** Starts the Companion app (this server runs from its CLI on Electron's Node). */
+function launchApp(): boolean {
+  if (!process.versions.electron || process.env.COMPANION_NO_AUTOLAUNCH) return false;
+  const appDir = resolve(dirname(process.argv[1]!), '..');
+  const { ELECTRON_RUN_AS_NODE: _, ...env } = process.env;
+  spawn(process.execPath, [appDir], { detached: true, stdio: 'ignore', env }).unref();
+  return true;
 }
 
 /** The calling session, from Claude Code's registry entry for our parent process. */

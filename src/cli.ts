@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
@@ -179,7 +179,55 @@ hooks
     console.log(s.installed ? `Installed: ${s.command}` : 'Not installed. Run `companion hooks install`.');
   });
 
-// Started by Claude Code inside sessions Companion launches (via --mcp-config): the new-chat tool.
+const tools = program
+  .command('tools')
+  .description("Make Companion's tools (open a new chat) available in all your Claude Code sessions");
+
+// `claude mcp add --scope user` registers the server for every session, including ones started in
+// iTerm. Sessions Companion starts get it either way (--mcp-config).
+const mcpServerCommand = () => {
+  const cli = resolve(process.argv[1]!);
+  return [process.execPath, cli, 'mcp'];
+};
+
+tools
+  .command('install')
+  .description('Register the tools in your Claude Code config (user scope)')
+  .action(() => {
+    if (!process.versions.electron) {
+      console.error('Run this through the `companion` command (it uses Electron\'s Node).');
+      process.exit(1);
+    }
+    const [command, ...args] = mcpServerCommand();
+    const r = spawnSync('claude', ['mcp', 'add', '--scope', 'user', 'companion', '-e', 'ELECTRON_RUN_AS_NODE=1', '--', command!, ...args], {
+      stdio: 'inherit',
+      env: withoutElectronFlag(),
+    });
+    if (r.status !== 0) process.exit(r.status ?? 1);
+    console.log('\nNew Claude sessions can now open a new chat in Companion when you ask ("let\'s discuss this in a separate chat").');
+    console.log('Sessions that are already running pick it up after a restart. Remove with `companion tools uninstall`.');
+  });
+
+tools
+  .command('uninstall')
+  .action(() => {
+    const r = spawnSync('claude', ['mcp', 'remove', '--scope', 'user', 'companion'], { stdio: 'inherit', env: withoutElectronFlag() });
+    process.exit(r.status ?? 1);
+  });
+
+tools
+  .command('status')
+  .action(() => {
+    const r = spawnSync('claude', ['mcp', 'get', 'companion'], { encoding: 'utf8', env: withoutElectronFlag() });
+    console.log(r.status === 0 ? r.stdout.trim() : 'Not installed for all sessions. Run `companion tools install`.');
+  });
+
+function withoutElectronFlag(): NodeJS.ProcessEnv {
+  const { ELECTRON_RUN_AS_NODE: _, ...env } = process.env;
+  return env;
+}
+
+// Started by Claude Code inside sessions (via --mcp-config, or user scope after `tools install`): the new-chat tool.
 program
   .command('mcp', { hidden: true })
   .action(async () => {
