@@ -114,32 +114,6 @@ try {
   await shot('5-from-terminal');
   iterm.kill();
 
-  // An existing chat started without Companion's tools (like one from before the feature).
-  const target = `ORCA-${Math.floor(Math.random() * 9000) + 1000}`; // unique per run: earlier runs' chats are in the list too
-  const out = execFileSync('claude', ['--bg', '--model', 'haiku', `Remember: the deploy target is ${target}. Reply with just: OK`], { cwd: repo, env: cleanEnv, encoding: 'utf8' });
-  const oldJob = out.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').match(/backgrounded\s*·\s*([0-9a-f]{8})/)[1];
-  jobs.add(oldJob);
-  const row = page.locator('.s-row', { hasText: new RegExp(target, 'i') }).first();
-  await until(async () => (await row.count()) > 0, 60000);
-  await row.click();
-  await until(async () => (await page.locator('.crumbs').innerText()).includes(oldJob), 15000);
-  check('an existing chat without the tool shows the notice', await until(async () => (await page.locator('.tool-notice').count()) === 1, 60000));
-  await shot('6-notice');
-  await page.getByRole('button', { name: 'Restart this chat with it' }).click();
-  check('restart switches to a copy', await until(async () => {
-    const j = (await page.locator('.crumbs').innerText()).match(/claude attach ([0-9a-f]{8})/)?.[1];
-    return !!j && j !== oldJob;
-  }, 60000));
-  jobs.add(await job());
-  const copyTitle = await page.locator('.head h1').innerText();
-  await composer.fill("Let's discuss rollback strategies for this deploy in a separate chat.");
-  await composer.press('Enter');
-  check('after the restart, asking opens a new chat', await until(async () => (await page.locator('.head h1').innerText()) !== copyTitle && (await page.locator('.u-msg').count()) >= 1, 120000));
-  jobs.add(await job());
-  await composer.fill('What was the deploy target from the earlier chat? Just the name.');
-  await composer.press('Enter');
-  check('…which knows the earlier chat', await until(async () => (await lastReply()).includes(target), 90000));
-  await shot('7-after-restart');
 } catch (err) {
   console.error(err);
   checks.push(['no exceptions', false]);

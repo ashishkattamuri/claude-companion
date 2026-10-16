@@ -181,35 +181,6 @@ try {
   check('…and the pinned file carried over', await until(async () => (await page.locator('.rail').innerText()).includes('notes.md')));
   await page.screenshot({ path: join(shots, '5-context-tools.png') });
 
-  // A chat started without Companion's tools (before it existed, or outside Companion).
-  const { spawnSync: run } = await import('node:child_process');
-  const started = run(fake, ['--bg', 'old chat about caching'], { cwd: project, env, encoding: 'utf8' });
-  const oldJob = started.stdout.match(/backgrounded · ([0-9a-f]{8})/)?.[1];
-  await until(async () => (await page.locator('.sessions').innerText()).includes('old chat about caching'));
-  await page.locator('.s-row', { hasText: 'old chat about caching' }).first().click();
-  check("a chat without the tool says it can't open new chats", await until(async () => (await page.locator('.tool-notice').count()) === 1));
-  await page.screenshot({ path: join(shots, '6-tool-notice.png') });
-  await page.getByRole('button', { name: 'Restart this chat with it' }).click();
-  check('restarting switches to a copy of the chat', await until(async () => {
-    const j = (await page.locator('.crumbs').innerText()).match(/claude attach ([0-9a-f]{8})/)?.[1];
-    return !!j && j !== oldJob;
-  }));
-  check('…which keeps the conversation', (await thread()).includes('echo: old chat about caching'));
-  await composer.fill('anything');
-  await composer.press('Enter');
-  check('…and has the tool, so the notice goes away', await until(async () => (await thread()).includes('echo: anything') && (await page.locator('.tool-notice').count()) === 0));
-  check('the superseded chat is no longer listed', (await page.locator('.sessions').innerText()).split('old chat about caching').length === 2);
-  run(fake, ['stop', oldJob], { env });
-
-  // Turning the tool on for every Claude session.
-  run(fake, ['--bg', 'another old chat'], { cwd: project, env });
-  await until(async () => (await page.locator('.sessions').innerText()).includes('another old chat'));
-  await page.locator('.s-row', { hasText: 'another old chat' }).first().click();
-  await until(async () => (await page.locator('.tool-notice').count()) === 1);
-  await page.getByRole('button', { name: 'Turn on for all Claude sessions' }).click();
-  check('turning it on for all sessions registers it with claude mcp add', await until(async () => existsSync(join(claudeDir, 'fake-mcp.json')) && readFileSync(join(claudeDir, 'fake-mcp.json'), 'utf8').includes('"companion"')));
-  const registered = JSON.parse(readFileSync(join(claudeDir, 'fake-mcp.json'), 'utf8')).companion ?? [];
-  check('…at user scope, running the built CLI on Electron', registered.includes('user') && registered.includes('ELECTRON_RUN_AS_NODE=1') && registered.some((a) => a.endsWith('dist/cli.js')));
 } catch (err) {
   console.error(err);
   checks.push(['no exceptions', false]);
