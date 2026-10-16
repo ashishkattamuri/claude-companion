@@ -54,13 +54,14 @@ export function loadConfig(path = CONFIG_PATH): Config {
   const cfg = ConfigSchema.parse(raw);
   const claudeDir = resolve(expandHome(cfg.sources.claude_dir));
   const dataDir = resolve(expandHome(cfg.data.dir));
-  const optOut = cfg.sources.opt_out.map(globToRegExp);
+  // A pattern starting with ! brings back folders an earlier pattern opted out.
+  const optOut = cfg.sources.opt_out.map((p) => ({ keep: p.startsWith('!'), re: globToRegExp(p.replace(/^!/, '')) }));
   return {
     ...cfg,
     claudeDir,
     projectsDir: join(claudeDir, 'projects'),
     dbPath: process.env.COMPANION_DB ?? join(dataDir, 'db.sqlite'),
-    isOptedOut: (cwd) => optOut.some((re) => re.test(cwd)),
+    isOptedOut: (cwd) => optOut.reduce((out, p) => (p.re.test(cwd) ? !p.keep : out), false),
   };
 }
 

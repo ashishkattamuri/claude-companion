@@ -42,6 +42,9 @@ export class TranscriptTail {
     try {
       size = statSync(this.path).size;
     } catch {
+      // Gone: Claude Code moves the whole file to another project folder when the session enters a
+      // worktree. Find it there and carry on from the same offset.
+      this.path = null;
       return [];
     }
     if (size < this.offset) this.offset = 0; // rewritten

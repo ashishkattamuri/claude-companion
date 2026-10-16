@@ -115,6 +115,13 @@ export class CompanionService {
     const superseded = new Set(
       (this.d.db.prepare(`SELECT parent_id FROM session_links WHERE kind = 'restart'`).all() as { parent_id: string }[]).map((r) => r.parent_id),
     );
+    // Chats opened from another one, so the sidebar can nest them under it.
+    const parents = new Map(
+      (this.d.db.prepare(`SELECT child_id, parent_id FROM session_links WHERE kind = 'branch'`).all() as { child_id: string; parent_id: string }[]).map(
+        (r) => [r.child_id, r.parent_id],
+      ),
+    );
+    for (const s of items) s.parentId = parents.get(s.id) ?? null;
     const rank = (s: SessionListItem) => (s.status === 'waiting' ? 3 : s.attached ? 2 : s.live ? 1 : 0);
     return items.filter((s) => !superseded.has(s.id) || s.live).sort((a, b) => rank(b) - rank(a) || (b.lastTs ?? '').localeCompare(a.lastTs ?? ''));
   }
@@ -122,7 +129,7 @@ export class CompanionService {
   private listItem(row: SessionRow, live: LiveSession | null): SessionListItem {
     const ch = this.channels.get(row.id);
     const status = ch?.alive ? ch.state.status : live ? (live.status === 'busy' ? 'busy' : live.status === 'waiting' ? 'waiting' : 'idle') : null;
-    return { ...row, live, background: live?.kind === 'bg', attached: !!ch?.attached, status };
+    return { ...row, live, background: live?.kind === 'bg', attached: !!ch?.attached, status, parentId: null };
   }
 
   listProjects() {

@@ -1,5 +1,5 @@
 import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadConfig, type Config } from '../src/config.js';
@@ -109,6 +109,13 @@ describe('scan', () => {
     } finally {
       db2.close();
     }
+  });
+
+  it('lets a ! pattern bring back a folder an earlier pattern opted out', () => {
+    const cfg = config(['~/**', '!~/work/demo']);
+    expect(cfg.isOptedOut(join(homedir(), 'work/secret'))).toBe(true);
+    expect(cfg.isOptedOut(join(homedir(), 'work/demo/src'))).toBe(false);
+    expect(cfg.isOptedOut('/opt/elsewhere')).toBe(false);
   });
 
   it('indexes prompts and assistant text for full-text search', () => {

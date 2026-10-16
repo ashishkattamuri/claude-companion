@@ -63,6 +63,8 @@ export interface SessionListItem extends SessionRow {
   /** Companion's terminal is attached to it right now. */
   attached: boolean;
   status: SessionState['status'] | null;
+  /** The chat this one was opened from. */
+  parentId: string | null;
 }
 
 /** Context tools and links for one session. */

@@ -31,7 +31,7 @@ app.whenReady().then(() => {
     db,
     cfg,
     llm: new ClaudeCliClient(db, join(dirname(cfg.dbPath), 'run')),
-    loadLive: () => readLiveSessions(cfg.claudeDir),
+    loadLive: () => readLiveSessions(cfg.claudeDir).filter((l) => !cfg.isOptedOut(l.cwd)),
     env: () => sessionEnv(shellPath),
     analysis: !process.env.COMPANION_NO_ANALYSIS,
     notes: !process.env.COMPANION_NO_NOTES,

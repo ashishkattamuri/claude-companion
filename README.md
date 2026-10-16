@@ -64,6 +64,8 @@ Everything stays on your machine. To exclude projects, create `~/.config/claude-
 opt_out = ["~/work/secret-project", "~/clients/*"]
 ```
 
+A pattern starting with `!` brings a folder back, so `["~/**", "!~/work/demo"]` shows only that one project.
+
 ## License
 
 MIT License.

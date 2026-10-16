@@ -89,10 +89,18 @@ function Group({
         {count !== undefined && <span>{count}</span>}
       </div>
       {items.length === 0 && <div className="muted small group-empty">Nothing here.</div>}
-      {items.map((s) => (
-        <button key={s.id} className={`s-row ${selectedId === s.id ? 'selected' : ''}`} onClick={() => onSelect(s.id)}>
+      {nest(items).map(({ s, depth }) => (
+        <button
+          key={s.id}
+          className={`s-row ${selectedId === s.id ? 'selected' : ''} ${depth ? 'child' : ''}`}
+          style={depth ? { paddingLeft: 8 + 16 * Math.min(depth, 3) } : undefined}
+          onClick={() => onSelect(s.id)}
+        >
           <span className={`dot ${dotClass(s)}`} title={dotTitle(s)} />
-          <span className="s-title">{s.title}</span>
+          <span className="s-title">
+            {depth > 0 && <span className="branch-mark" aria-hidden="true">↳ </span>}
+            {s.title}
+          </span>
           <span className="s-time">{s.status === 'busy' ? 'now' : timeAgo(s.lastTs, Date.now(), true)}</span>
           <span className="s-meta">
             <span className="proj">{s.project ?? '?'}</span>
@@ -104,6 +112,24 @@ function Group({
       ))}
     </>
   );
+}
+
+/** Puts chats opened from another chat right under it, indented, when both are in the same list. */
+function nest(items: SessionListItem[]): { s: SessionListItem; depth: number }[] {
+  const ids = new Set(items.map((s) => s.id));
+  const kids = new Map<string, SessionListItem[]>();
+  for (const s of items) if (s.parentId && ids.has(s.parentId)) kids.set(s.parentId, [...(kids.get(s.parentId) ?? []), s]);
+  const out: { s: SessionListItem; depth: number }[] = [];
+  const seen = new Set<string>();
+  const walk = (s: SessionListItem, depth: number) => {
+    if (seen.has(s.id)) return;
+    seen.add(s.id);
+    out.push({ s, depth });
+    for (const k of kids.get(s.id) ?? []) walk(k, depth + 1);
+  };
+  for (const s of items) if (!s.parentId || !ids.has(s.parentId)) walk(s, 0);
+  for (const s of items) walk(s, 0);
+  return out;
 }
 
 const dotClass = (s: SessionListItem) =>
