@@ -145,7 +145,9 @@ function runDaemon([sessionId, ...args]) {
       pending = `toolu_${randomUUID().slice(0, 8)}`;
       record({ type: 'assistant', message: { role: 'assistant', model: 'claude-fake-1', content: [{ type: 'tool_use', id: pending, name: 'Bash', input: { command: 'touch approved.txt', description: 'Create a marker file' } }] } });
       out("\n Bash command\n Create a marker file\n\n touch approved.txt\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and don't ask again\n   3. No\n\n Esc to cancel\n");
-      status('waiting', 'permission prompt');
+      // Like Claude Code, the registry says "waiting" a moment after the dialog is drawn.
+      const id = pending;
+      setTimeout(() => pending === id && status('waiting', 'permission prompt'), 1200);
       return;
     }
     reply(`echo: ${prompt}`);

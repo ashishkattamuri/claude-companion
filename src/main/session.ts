@@ -254,7 +254,9 @@ export class SessionChannel extends EventEmitter {
     this.bg = entry;
 
     let prompt = this.state.prompt;
-    if (this.attached && this.screenDirty) {
+    // Claude Code draws a dialog before its registry says "waiting", so read the screen again once
+    // it does, even if nothing new was drawn since.
+    if (this.attached && (this.screenDirty || (entry.status === 'waiting' && !prompt))) {
       this.screenDirty = false;
       const found = detectPrompt(this.att!.screen.lines());
       // A numbered list in Claude's own reply looks like a menu; only trust it while Claude Code says it's waiting.

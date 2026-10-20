@@ -168,6 +168,31 @@ describe('detectPrompt', () => {
     });
   });
 
+  it('reads a permission dialog with the auto-mode option and an approval note', () => {
+    const screen = [
+      ' Bash command',
+      '',
+      '   gh issue view 1 --comments && git ls-files | head -100',
+      '   Read the issue and list files',
+      '',
+      ' ' + '╌'.repeat(60),
+      ' This command requires approval',
+      '',
+      ' Do you want to proceed?',
+      ' ❯ 1. Yes',
+      '   2. Yes, and don’t ask again for: gh issue *',
+      '   3. Yes, and switch to auto mode · auto mode handles these prompts for you',
+      '   4. No',
+      '',
+      ' Esc to cancel · Tab to amend',
+    ];
+    expect(detectPrompt(screen)).toMatchObject({
+      kind: 'permission',
+      header: 'Bash command',
+      options: [{ key: '1', selected: true }, { key: '2' }, { key: '3', label: 'Yes, and switch to auto mode · auto mode handles these prompts for you' }, { key: '4', label: 'No' }],
+    });
+  });
+
   it('ignores a numbered list that does not count down to 1', () => {
     expect(detectPrompt(['Steps:', '  2. Build', '     then', '  3. Ship'])).toBeNull();
   });
