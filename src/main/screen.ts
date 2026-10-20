@@ -35,6 +35,8 @@ export class Screen {
 }
 
 const OPTION = /^\s*(❯)?\s*(\d+)\.\s+(.+?)\s*$/;
+/** An option's indented description line, or a separator line. */
+const BETWEEN_OPTIONS = /^(\s{3,}\S|\s*─+\s*$)/;
 
 /**
  * Recognises the dialogs Claude Code shows at the bottom of the screen, so the UI can offer the
@@ -57,12 +59,21 @@ export function detectPrompt(lines: string[]): ScreenPrompt | null {
     }
   }
   if (end === -1) return null;
+  // Walk up through options numbered down to 1. Questions Claude asks put a description under
+  // each option and a separator before the last one, so those lines may sit between options.
+  const options: { key: string; label: string; selected: boolean }[] = [];
   let start = end;
-  while (start > 0 && OPTION.test(lines[start - 1]!)) start--;
-  const options = lines.slice(start, end + 1).map((l) => {
-    const m = l.match(OPTION)!;
-    return { key: m[2]!, label: m[3]!, selected: !!m[1] };
-  });
+  for (let i = end; i >= 0; i--) {
+    const m = lines[i]!.match(OPTION);
+    if (m) {
+      if (options.length && Number(m[2]) !== Number(options[0]!.key) - 1) return null;
+      options.unshift({ key: m[2]!, label: m[3]!, selected: !!m[1] });
+      start = i;
+      if (m[2] === '1') break;
+    } else if (!BETWEEN_OPTIONS.test(lines[i]!) || start - i > 2) {
+      return null;
+    }
+  }
   if (options.length < 2 || options[0]!.key !== '1') return null;
 
   // The question is the nearest non-empty line above the options.

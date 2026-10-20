@@ -61,6 +61,9 @@ export function Conversation({ items, state, sentFromApp, onAnswer }: Props) {
         {state.status === 'waiting' && !state.prompt && state.mode === 'mirror' && (
           <div className="notice warn">Claude is waiting for an answer in the other terminal.</div>
         )}
+        {state.status === 'waiting' && !state.prompt && state.mode !== 'mirror' && (
+          <div className="notice warn">Claude is asking you something. Answer it in the terminal view; your messages send after.</div>
+        )}
         {state.status === 'busy' && (
           <div className="working">
             <span className="spinner" /> Claude is working…

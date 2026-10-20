@@ -111,6 +111,28 @@ const TRUST_SCREEN = `
    Yes, I trust this folder
  Enter to confirm · Esc to cancel`.split('\n');
 
+// Claude Code 2.1.304: AskUserQuestion with several questions, on the second one.
+const QUESTION_SCREEN = `
+❯ Help me plan Thanksgiving this year with the baby.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☒ Baby's age  ☐ Setup  ☐ Group size  ✔ Submit  →
+
+Where will you spend Thanksgiving?
+
+❯ 1. Hosting at home
+     Guests come to us
+  2. Driving to family
+     Road trip, possibly overnight
+  3. Flying to family
+     Air travel with the baby
+  4. Not decided yet
+     Help me pick
+  5. Type something.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  6. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel`.split('\n');
+
 describe('detectPrompt', () => {
   it('reads a permission dialog with its options', () => {
     expect(detectPrompt(PERMISSION_SCREEN)).toEqual({
@@ -129,6 +151,25 @@ describe('detectPrompt', () => {
     expect(detectPrompt(TRUST_SCREEN)).toMatchObject({ kind: 'trust', yesSelected: false });
     const moved = TRUST_SCREEN.map((l) => l.replace('❯ No, exit', '  No, exit').replace('  Yes, I trust', '❯ Yes, I trust'));
     expect(detectPrompt(moved)).toMatchObject({ kind: 'trust', yesSelected: true });
+  });
+
+  it('reads a question Claude asks, with option descriptions in between', () => {
+    expect(detectPrompt(QUESTION_SCREEN)).toMatchObject({
+      kind: 'choice',
+      question: 'Where will you spend Thanksgiving?',
+      options: [
+        { key: '1', label: 'Hosting at home', selected: true },
+        { key: '2', label: 'Driving to family', selected: false },
+        { key: '3', label: 'Flying to family', selected: false },
+        { key: '4', label: 'Not decided yet', selected: false },
+        { key: '5', label: 'Type something.', selected: false },
+        { key: '6', label: 'Chat about this', selected: false },
+      ],
+    });
+  });
+
+  it('ignores a numbered list that does not count down to 1', () => {
+    expect(detectPrompt(['Steps:', '  2. Build', '     then', '  3. Ship'])).toBeNull();
   });
 
   it('finds nothing on an ordinary screen', () => {

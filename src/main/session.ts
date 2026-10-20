@@ -279,11 +279,14 @@ export class SessionChannel extends EventEmitter {
     this.update({ status: status === 'busy' ? 'busy' : status === 'waiting' ? 'waiting' : 'idle' });
   }
 
-  /** Types queued messages once Claude Code shows its input box (registered, no dialog open). */
+  /**
+   * Types queued messages once Claude Code shows its input box (registered, no dialog open).
+   * While it is waiting on a dialog, even one we can't read, typing would go into the dialog.
+   */
   private flush(): void {
     const a = this.att;
     if (!a || a.exited || !this.queue.length) return;
-    if (this.state.prompt || this.state.status === 'starting') return;
+    if (this.state.prompt || this.state.status === 'starting' || this.state.status === 'waiting') return;
     if (this.toolsDeadline && Date.now() < this.toolsDeadline) return;
     const text = this.queue.shift()!;
     this.awaitingEcho.push(text);
