@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { Config } from '../config.js';
+import { gatherForRecap } from '../connectors/index.js';
 import { readLiveSessions } from '../ingest/live.js';
 import { scan } from '../ingest/scanner.js';
 import type { DB } from '../store/db.js';
@@ -97,7 +98,12 @@ export async function runJobs(db: DB, cfg: Config, llm: LlmClient, opts: RunOpti
 
     if ((opts.forceRecap || recapNeeded(db, cfg, now)) && result.llmCalls < budget) {
       writeStatus(db, { state: 'running', step: 'writing recap' });
-      result.recapWritten = await generateRecap(db, cfg, llm, now);
+      result.recapWritten = await generateRecap(db, cfg, llm, now, async (since, cwds) => {
+        writeStatus(db, { state: 'running', step: 'reading connectors' });
+        const source = await gatherForRecap(db, cfg, since, cwds);
+        writeStatus(db, { state: 'running', step: 'writing recap' });
+        return source;
+      });
       if (result.recapWritten) result.llmCalls++;
     }
     writeStatus(db, { state: 'idle' });

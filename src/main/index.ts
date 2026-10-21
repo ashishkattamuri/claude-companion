@@ -90,6 +90,24 @@ app.whenReady().then(() => {
     const done = await service.deleteSessions(ids);
     return done.ok ? { ok: true, value: true } : done;
   });
+  ipcMain.handle('connectors:list', () => service.listConnectors());
+  ipcMain.handle('connectors:check', (_e, name: string) => service.checkConnector(name));
+  ipcMain.handle('connectors:setEnabled', (_e, name: string, enabled: boolean) => service.setConnectorEnabled(name, enabled));
+  ipcMain.handle('connectors:connectGitHub', (_e, token: string) => service.connectGitHub(token));
+  ipcMain.handle('connectors:dismissOffer', () => service.dismissGithubOffer());
+  ipcMain.handle('connectors:remove', async (_e, name: string) => {
+    const r = await dialog.showMessageBox(win!, {
+      type: 'warning',
+      message: `Remove ${name} from Claude Code?`,
+      detail: `It's removed for every Claude Code session, not just Companion, along with its saved settings. To only stop Companion using it, turn it off instead.`,
+      buttons: ['Remove', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+    });
+    if (r.response !== 0) return { ok: true, value: false };
+    const done = service.removeConnector(name);
+    return done.ok ? { ok: true, value: true } : done;
+  });
   ipcMain.handle('term:replay', (_e, id: string) => service.replay(id));
   ipcMain.on('term:write', (_e, id: string, data: string) => service.write(id, data));
   ipcMain.on('term:resize', (_e, id: string, cols: number, rows: number) => service.resize(id, cols, rows));

@@ -306,6 +306,31 @@ button.chip:hover:not(:disabled) { color: var(--ink); }
 .projects { display: flex; flex-direction: column; gap: 14px; }
 .project-name { font-weight: 500; margin-bottom: 2px; color: var(--muted); }
 .project p { max-width: 70ch; }
+.offer { gap: 8px; }
+.gh-groups { display: flex; flex-direction: column; gap: 14px; }
+.gh-label { font-weight: 500; margin-bottom: 4px; }
+.gh-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
+.gh-list a { color: var(--ink); text-decoration: none; }
+.gh-list a:hover { text-decoration: underline; text-underline-offset: 2px; }
+.error-text { color: var(--red); }
+
+/* Connectors */
+.connectors { display: flex; flex-direction: column; gap: 12px; }
+.connector { border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px; background: var(--surface); }
+.connector-head { display: flex; align-items: center; gap: 10px; }
+.connector h2 { font-size: 15px; font-weight: 600; }
+.status-pill.red { background: var(--red-soft); color: var(--red); }
+.server-list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin-bottom: 10px; }
+.server-list:empty { display: none; }
+.server-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--raised); border-radius: 9px; min-width: 0; }
+.server-list .server-row { border-radius: 0; background: var(--surface); }
+.server-list .server-row + .server-row { border-top: 1px solid var(--line); }
+.btn.danger { color: var(--red); }
+.token-form { display: flex; flex-direction: column; gap: 10px; }
+.steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; color: var(--muted); max-width: 70ch; }
+.steps a { color: var(--accent); }
+.input { font: 13px var(--mono); color: var(--ink); background: var(--raised); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; outline: none; }
+.input:focus { border-color: var(--accent); }
 
 /* Sheet and toast */
 .sheet-bg { position: fixed; inset: 0; background: #0a0d1366; display: flex; align-items: flex-start; justify-content: center; padding: 10vh 16px 16px; z-index: 10; }

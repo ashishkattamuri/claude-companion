@@ -155,4 +155,25 @@ export const MIGRATIONS: string[] = [
     deleted_at TEXT NOT NULL
   );
   `,
+  `
+  -- MCP servers from Claude Code's list that Companion reads from, and how the last check went.
+  -- The servers themselves (and their credentials) stay in Claude Code's config.
+  CREATE TABLE connector_servers (
+    name       TEXT PRIMARY KEY,
+    enabled    INTEGER NOT NULL DEFAULT 1,
+    status     TEXT,              -- connected | error
+    detail     TEXT,              -- who it's signed in as, or the error
+    checked_at TEXT
+  );
+
+  -- What a connector returned for a recap, shown next to it on Today.
+  CREATE TABLE recap_sources (
+    day        TEXT NOT NULL,
+    kind       TEXT NOT NULL,     -- github
+    data_json  TEXT,
+    error      TEXT,
+    fetched_at TEXT NOT NULL,
+    PRIMARY KEY (day, kind)
+  );
+  `,
 ];

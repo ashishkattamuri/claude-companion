@@ -44,6 +44,8 @@ const ConfigSchema = z.object({
 
 export type Config = z.infer<typeof ConfigSchema> & {
   claudeDir: string;
+  /** Claude Code's settings file, where its MCP servers are listed. */
+  claudeJson: string;
   projectsDir: string;
   dbPath: string;
   isOptedOut: (cwd: string) => boolean;
@@ -59,6 +61,8 @@ export function loadConfig(path = CONFIG_PATH): Config {
   return {
     ...cfg,
     claudeDir,
+    // Claude Code keeps it beside the folder by default, and inside it when CLAUDE_CONFIG_DIR moves the folder.
+    claudeJson: claudeDir === join(homedir(), '.claude') ? join(homedir(), '.claude.json') : join(claudeDir, '.claude.json'),
     projectsDir: join(claudeDir, 'projects'),
     dbPath: process.env.COMPANION_DB ?? join(dataDir, 'db.sqlite'),
     isOptedOut: (cwd) => optOut.reduce((out, p) => (p.re.test(cwd) ? !p.keep : out), false),

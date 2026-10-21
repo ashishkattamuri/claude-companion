@@ -1,4 +1,5 @@
-import type { RecapView } from '../../shared/api';
+import type { GitHubItem, RecapView } from '../../shared/api';
+import { api } from './api';
 import { greeting } from './format';
 
 interface Props {
@@ -8,9 +9,10 @@ interface Props {
   /** Open the session an item came from, with the item ready to send. */
   onContinue: (sessionId: string, text: string) => void;
   onRegenerate: () => void;
+  onConnectors: () => void;
 }
 
-export function TodayView({ data, onStart, onContinue, onRegenerate }: Props) {
+export function TodayView({ data, onStart, onContinue, onRegenerate, onConnectors }: Props) {
   const status = data?.status;
   const running = status?.state === 'running';
   const row = data?.recap;
@@ -35,6 +37,24 @@ export function TodayView({ data, onStart, onContinue, onRegenerate }: Props) {
         </div>
       )}
       {(status?.state === 'error' || status?.state === 'paused') && <div className="banner error">{status.error}</div>}
+
+      {data?.githubOffer && (
+        <div className="banner info offer">
+          <div className="grow">
+            <strong>Add GitHub to your recap?</strong>
+            <div className="muted small">
+              PRs waiting on your review, failing CI and new issues, read through
+              {data.githubOffer.existing ? <> your <span className="mono">{data.githubOffer.existing}</span> MCP server</> : " GitHub's MCP server"}.
+            </div>
+          </div>
+          <button className="btn primary small" onClick={onConnectors}>
+            {data.githubOffer.existing ? 'Use it' : 'Connect GitHub'}
+          </button>
+          <button className="btn quiet small" onClick={() => void api.dismissGithubOffer()}>
+            Not now
+          </button>
+        </div>
+      )}
 
       {!row && !running && (
         <div className="empty">
@@ -78,6 +98,8 @@ export function TodayView({ data, onStart, onContinue, onRegenerate }: Props) {
             ))}
           </div>
 
+          {data?.source && <GitHubSection source={data.source} />}
+
           {row.recap.blockers.length > 0 && (
             <>
               <h3 className="section">Blocked</h3>
@@ -101,5 +123,47 @@ export function TodayView({ data, onStart, onContinue, onRegenerate }: Props) {
         </>
       )}
     </div>
+  );
+}
+
+const GROUPS = [
+  ['awaitingReview', 'Waiting on your review'],
+  ['failingCi', 'Your PRs with failing checks'],
+  ['newIssues', 'New issues'],
+  ['merged', 'Merged'],
+] as const;
+
+/** Straight from GitHub, so it's exact whatever the recap says. */
+function GitHubSection({ source }: { source: NonNullable<RecapView['source']> }) {
+  const gh = source.github;
+  return (
+    <>
+      <h3 className="section">GitHub</h3>
+      {source.githubError && <p className="error-text small">Couldn't read GitHub for this recap: {source.githubError}</p>}
+      {gh && GROUPS.every(([k]) => gh[k].length === 0) && <p className="muted">Nothing new on GitHub.</p>}
+      {gh && (
+        <div className="gh-groups">
+          {GROUPS.filter(([k]) => gh[k].length > 0).map(([k, label]) => (
+            <div key={k}>
+              <div className="gh-label">
+                {label} <span className="muted">{gh[k].length}</span>
+              </div>
+              <ul className="gh-list">
+                {gh[k].map((i: GitHubItem) => (
+                  <li key={i.url}>
+                    <a href={i.url} target="_blank" rel="noreferrer">
+                      <span className="mono muted">
+                        {i.repo}#{i.number}
+                      </span>{' '}
+                      {i.title}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }

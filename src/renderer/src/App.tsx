@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { NewSessionRequest, RecapView, SessionListItem } from '../../shared/api';
 import { api } from './api';
+import { ConnectorsPage } from './ConnectorsPage';
 import { NewSessionSheet } from './NewSessionSheet';
 import { SessionWorkspace } from './SessionWorkspace';
 import { Sidebar, type Page } from './Sidebar';
@@ -9,11 +10,10 @@ import { TodayView } from './TodayView';
 
 type Selection = { kind: 'page'; page: Page } | { kind: 'session'; id: string; draft?: string };
 
-const SOON: Record<Exclude<Page, 'today'>, { title: string; text: string }> = {
+const SOON: Record<Exclude<Page, 'today' | 'connectors'>, { title: string; text: string }> = {
   ideas: { title: 'Ideas', text: 'Follow-ups and directions from your conversations, ready to run in one click.' },
   goals: { title: 'Goals', text: 'Long-running goals checked on a schedule that report back only when something changes.' },
   feed: { title: 'Feed', text: 'News related to what you are working on.' },
-  connectors: { title: 'Connectors', text: 'GitHub, Linear, Slack and calendar via MCP, enabled when first needed.' },
 };
 
 export function App() {
@@ -122,9 +122,11 @@ export function App() {
             onStart={(project, sessionId, text) => setSheet({ cwd: cwdFor(project, sessionId), prompt: text })}
             onContinue={(id, text) => setSelection({ kind: 'session', id, draft: text })}
             onRegenerate={() => void api.regenerateRecap()}
+            onConnectors={() => setSelection({ kind: 'page', page: 'connectors' })}
           />
         )}
-        {selection.kind === 'page' && selection.page !== 'today' && (
+        {selection.kind === 'page' && selection.page === 'connectors' && <ConnectorsPage onError={setToast} />}
+        {selection.kind === 'page' && selection.page !== 'today' && selection.page !== 'connectors' && (
           <div className="page">
             <div className="empty">
               <h2>{SOON[selection.page].title}</h2>

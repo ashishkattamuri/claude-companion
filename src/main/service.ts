@@ -7,6 +7,19 @@ import { notesBehind, notesPath, readNotes, recentExchanges, updateNotes } from 
 import { getRecap, recapDay } from '../analyze/recap.js';
 import { analysisNeeded, currentStatus, runJobs } from '../analyze/runner.js';
 import type { Config } from '../config.js';
+import {
+  checkServer,
+  dismissGithubOffer,
+  forgetServer,
+  getRecapSource,
+  githubOffer,
+  listConnectors,
+  setServerEnabled,
+  type ConnectorsView,
+  type ServerView,
+} from '../connectors/index.js';
+import { githubServerConfig, isGitHubServer } from '../connectors/github.js';
+import { addClaudeServer, readClaudeServers, removeClaudeServer } from '../connectors/servers.js';
 import type { LiveSession } from '../ingest/live.js';
 import { listTranscripts, scan } from '../ingest/scanner.js';
 import type { DB } from '../store/db.js';
@@ -251,7 +264,69 @@ export class CompanionService {
   }
 
   getRecap(): RecapView {
-    return { recap: getRecap(this.d.db, recapDay(this.d.cfg).day), status: currentStatus(this.d.db, this.d.cfg) };
+    const { day } = recapDay(this.d.cfg);
+    const recent = Date.now() - 14 * 86_400_000;
+    const cwds = this.listProjects().filter((p) => p.lastTs && Date.parse(p.lastTs) > recent).map((p) => p.cwd);
+    return {
+      recap: getRecap(this.d.db, day),
+      status: currentStatus(this.d.db, this.d.cfg),
+      source: getRecapSource(this.d.db, day),
+      githubOffer: githubOffer(this.d.db, this.d.cfg, cwds),
+    };
+  }
+
+  listConnectors(): ConnectorsView {
+    return listConnectors(this.d.db, this.d.cfg);
+  }
+
+  async checkConnector(name: string): Promise<ServerView | null> {
+    const view = await checkServer(this.d.db, this.d.cfg, name);
+    this.d.onChanged?.();
+    return view;
+  }
+
+  async setConnectorEnabled(name: string, enabled: boolean): Promise<ServerView | null> {
+    setServerEnabled(this.d.db, this.d.cfg, name, enabled);
+    // Turning one on checks it straight away, so the page says whether it works.
+    const view = enabled ? await checkServer(this.d.db, this.d.cfg, name) : null;
+    this.d.onChanged?.();
+    return view ?? listConnectors(this.d.db, this.d.cfg).connectors.find((c) => c.server?.name === name)?.server ?? null;
+  }
+
+  /**
+   * Adds GitHub's read-only server to Claude Code, for every session, signed in with `token`. The
+   * token lives in Claude Code's settings like any server you add yourself, not in Companion.
+   */
+  async connectGitHub(token: string): Promise<Result<ServerView | null>> {
+    token = token.trim();
+    if (!/^[A-Za-z0-9_]{20,}$/.test(token)) return { ok: false, error: "That doesn't look like a GitHub token." };
+    const servers = readClaudeServers(this.d.cfg.claudeJson);
+    const taken = (n: string) => servers.find((s) => s.name === n);
+    // Replace a GitHub server of that name (e.g. a new token); never someone else's server.
+    const name = !taken('github') || isGitHubServer(taken('github')!) ? 'github' : 'github-companion';
+    const bin = this.channelDeps.claudeBin;
+    if (taken(name)) {
+      const err = removeClaudeServer(bin, this.d.env(), name);
+      if (err) return { ok: false, error: err };
+    }
+    const err = addClaudeServer(bin, this.d.env(), name, githubServerConfig(token));
+    if (err) return { ok: false, error: err };
+    // One GitHub source: stop reading from any other GitHub server.
+    for (const s of servers) if (s.name !== name && isGitHubServer(s)) setServerEnabled(this.d.db, this.d.cfg, s.name, false);
+    return { ok: true, value: await this.setConnectorEnabled(name, true) };
+  }
+
+  removeConnector(name: string): Result {
+    const err = removeClaudeServer(this.channelDeps.claudeBin, this.d.env(), name);
+    if (err) return { ok: false, error: err };
+    forgetServer(this.d.db, this.d.cfg, name);
+    this.d.onChanged?.();
+    return ok;
+  }
+
+  dismissGithubOffer(): void {
+    dismissGithubOffer(this.d.db);
+    this.d.onChanged?.();
   }
 
   analyze(opts: { force?: boolean; endedSessionIds?: string[] } = {}): Promise<void> {

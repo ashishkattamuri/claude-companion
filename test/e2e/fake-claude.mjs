@@ -34,6 +34,15 @@ function mcp([sub, ...args]) {
   const name = args.find((a, i) => !a.startsWith('-') && !['--scope', '-s', '-e', '--env'].includes(args[i - 1]));
   if (sub === 'add') servers[name] = args;
   if (sub === 'remove') delete servers[args.at(-1)];
+  // Connectors: `add-json` and `remove` change the server list in .claude.json, like Claude Code.
+  if (sub === 'add-json' || sub === 'remove') {
+    const settingsFile = join(claudeDir, '.claude.json');
+    const settings = existsSync(settingsFile) ? JSON.parse(readFileSync(settingsFile, 'utf8')) : {};
+    settings.mcpServers ??= {};
+    if (sub === 'add-json') settings.mcpServers[name] = JSON.parse(args.at(-1));
+    else delete settings.mcpServers[args.at(-1)];
+    writeFileSync(settingsFile, JSON.stringify(settings));
+  }
   if (sub === 'get' && !servers[args[0]]) {
     console.error(`No MCP server named "${args[0]}".`);
     process.exit(1);

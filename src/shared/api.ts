@@ -5,10 +5,13 @@
 import type { ConversationItem, PatchHunk, SessionFacts, ToolResult } from '../adapter/conversation.js';
 import type { RecapRow } from '../analyze/recap.js';
 import type { AnalyzerStatus } from '../analyze/runner.js';
+import type { ConnectorsView, RecapSource, ServerView } from '../connectors/index.js';
+import type { GitHubActivity, GitHubItem } from '../connectors/github.js';
 import type { LiveSession } from '../ingest/live.js';
 import type { ProjectRow, SessionRow } from '../store/queries.js';
 
 export type { ConversationItem, PatchHunk, SessionFacts, ToolResult, ProjectRow, RecapRow, AnalyzerStatus, LiveSession };
+export type { ConnectorsView, ServerView, RecapSource, GitHubActivity, GitHubItem };
 
 /** A dialog Claude Code is showing in the terminal, offered in the UI as well. */
 export type ScreenPrompt =
@@ -85,6 +88,10 @@ export interface SessionExtras {
 export interface RecapView {
   recap: RecapRow | null;
   status: AnalyzerStatus | null;
+  /** What GitHub returned for this recap. */
+  source: RecapSource | null;
+  /** Offer to connect GitHub: you work in GitHub repos and Companion doesn't read from GitHub yet. */
+  githubOffer: { existing: string | null } | null;
 }
 
 export interface NewSessionRequest {
@@ -138,6 +145,18 @@ export interface CompanionApi {
   restartWithTools(sessionId: string): Promise<Result<string>>;
   /** Registers the new-chat tool for every Claude session, including ones in a terminal. */
   installToolsEverywhere(): Promise<Result>;
+  /** MCP servers from Claude Code's list, by what Companion uses them for. */
+  listConnectors(): Promise<ConnectorsView>;
+  /** Connects to a server to see whether it works (and who it's signed in as). */
+  checkConnector(name: string): Promise<ServerView | null>;
+  /** Lets Companion read from a server, or stops it and forgets what it fetched. */
+  setConnectorEnabled(name: string, enabled: boolean): Promise<ServerView | null>;
+  /** Adds GitHub's read-only MCP server to Claude Code with this token, and turns it on. */
+  connectGitHub(token: string): Promise<Result<ServerView | null>>;
+  /** Asks to confirm, then removes the server from Claude Code (`claude mcp remove`). */
+  removeConnector(name: string): Promise<Result<boolean>>;
+  dismissGithubOffer(): Promise<void>;
+
   /** The app wants to show a session (e.g. a new chat Claude just opened). */
   onNavigate(cb: (sessionId: string, draft?: string) => void): () => void;
 

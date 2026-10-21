@@ -34,6 +34,23 @@ for (const [i, id] of OLD.entries())
     readFileSync(join(fixtureDir, `${SESSION}.jsonl`), 'utf8').replaceAll(SESSION, id).replaceAll('Webhook retry logic', `Old experiment ${'AB'[i]}`),
   );
 
+// The project is a GitHub repository, and Claude Code has a GitHub MCP server (a fake one) plus
+// another server Companion has no use for.
+{
+  const { execFileSync } = await import('node:child_process');
+  execFileSync('git', ['init', '-q', project]);
+  execFileSync('git', ['-C', project, 'remote', 'add', 'origin', 'https://github.com/acme/demo-app.git']);
+}
+writeFileSync(
+  join(claudeDir, '.claude.json'),
+  JSON.stringify({
+    mcpServers: {
+      github: { type: 'stdio', command: process.execPath, args: [join(repo, 'test/fixtures/fake-github-mcp-server.mjs')], env: { FAKE_GH_LOG: join(root, 'gh-calls.log') } },
+      notes: { type: 'stdio', command: 'true', args: [] },
+    },
+  }),
+);
+
 const fake = join(root, 'claude-fake');
 writeFileSync(fake, `#!/bin/sh\nexec node "${join(repo, 'test/e2e/fake-claude.mjs')}" "$@"\n`, { mode: 0o755 });
 const config = join(root, 'config.toml');
@@ -211,6 +228,37 @@ try {
   check('…and deletes their transcripts', OLD.every((id) => !existsSync(join(fixtureDir, `${id}.jsonl`))));
   await new Promise((r) => setTimeout(r, 5500)); // the next background scan
   check('…and they stay gone after a rescan', (await row('Old experiment').count()) === 0 && (await row('Webhook retry logic').count()) === 1);
+
+  // Connectors: offered on Today, turned on and off, removed from Claude Code.
+  const nav = (label) => page.locator('.nav button', { hasText: label }).click();
+  const github = page.locator('.connector', { hasText: 'GitHub' });
+  const claudeServers = () => Object.keys(JSON.parse(readFileSync(join(claudeDir, '.claude.json'), 'utf8')).mcpServers ?? {});
+  await nav('Today');
+  const offer = page.locator('.offer');
+  check('Today offers your GitHub server for the recap', await until(async () => (await offer.innerText()).includes('github')));
+  await offer.getByRole('button', { name: 'Use it' }).click();
+  check('…which opens Connectors, with GitHub not yet used', await until(async () => (await github.innerText()).includes('Use in Companion')));
+  check('other Claude Code servers are listed apart', (await page.locator('.server-list').innerText()).includes('notes'));
+  await github.getByRole('button', { name: 'Use in Companion' }).click();
+  check('turning GitHub on connects and shows who it is signed in as', await until(async () => (await github.innerText()).includes('Signed in as @octo')));
+  check('…and marks it connected', (await github.locator('.status-pill').innerText()) === 'Connected');
+  check('…using read tools only', readFileSync(join(root, 'gh-calls.log'), 'utf8').split('\n').filter(Boolean).every((l) => JSON.parse(l).tool === 'get_me'));
+  await page.screenshot({ path: join(shots, '7-connectors.png') });
+  await nav('Today');
+  check('…and Today stops offering it', await until(async () => (await offer.count()) === 0));
+  await nav('Connectors');
+  await github.getByRole('button', { name: 'Turn off' }).click();
+  check('turning it off leaves it in Claude Code', await until(async () => (await github.locator('.status-pill').innerText()) === 'Off') && claudeServers().includes('github'));
+  await github.getByRole('button', { name: 'Remove from Claude Code…' }).click(); // the confirm dialog is stubbed above
+  check('removing it takes it out of Claude Code', await until(async () => !claudeServers().includes('github')) && claudeServers().includes('notes'));
+  check('…and the page offers to connect with a token', await until(async () => (await github.locator('input[type=password]').count()) === 1));
+  await github.locator('input[type=password]').fill('not-a-token');
+  await github.getByRole('button', { name: 'Connect' }).click();
+  check('a malformed token is refused before anything is added', await until(async () => (await page.locator('.toast').innerText()).includes("doesn't look like a GitHub token")) && !claudeServers().includes('github'));
+  await nav('Today');
+  check('Today now offers to connect GitHub', await until(async () => (await offer.innerText()).includes('Connect GitHub')));
+  await offer.getByRole('button', { name: 'Not now' }).click();
+  check('…until you say not now', await until(async () => (await offer.count()) === 0));
 
 } catch (err) {
   console.error(err);
