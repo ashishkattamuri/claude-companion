@@ -22,6 +22,7 @@ export interface ChannelDeps {
 }
 
 interface Attachment {
+  jobId: string;
   pty: pty.IPty;
   screen: Screen;
   buffer: string;
@@ -114,6 +115,12 @@ export class SessionChannel extends EventEmitter {
 
   /** A background session was just started or found for this session. */
   useBackground(entry: BackgroundEntry): void {
+    // Attached to another job: let it go, so attach() connects to this one.
+    if (this.attached && this.att!.jobId !== entry.jobId) {
+      const old = this.att!;
+      this.att = null;
+      old.pty.kill();
+    }
     this.bg = entry;
     this.mirrorPid = null;
     this.tail.follow(entry.sessionId);
@@ -124,6 +131,7 @@ export class SessionChannel extends EventEmitter {
   attach(): void {
     if (this.attached || !this.bg) return;
     const att: Attachment = {
+      jobId: this.bg.jobId,
       pty: pty.spawn(this.deps.claudeBin, ['attach', this.bg.jobId], {
         name: 'xterm-256color',
         cols: COLS,
@@ -148,6 +156,7 @@ export class SessionChannel extends EventEmitter {
     att.pty.onExit(() => {
       att.exited = true;
       att.screen.dispose();
+      if (this.att !== att) return; // replaced by an attachment to another job
       // Detaching leaves a background session running; it just isn't attached here any more.
       this.update({ mode: this.bg ? 'background' : 'history', prompt: null });
     });

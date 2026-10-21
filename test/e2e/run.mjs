@@ -148,9 +148,15 @@ try {
   await page.getByRole('button', { name: 'End', exact: true }).click();
   check('ending the session stops it', await until(async () => (await status()).includes('Not running')));
 
-  await composer.fill('picking this back up');
-  await composer.press('Enter');
+  // Several messages in quick succession (e.g. sent again because nothing seemed to happen) while
+  // the chat is still starting up: they all go to the same session, and all of them show.
+  for (const text of ['picking this back up', 'are you there?', 'hello?']) {
+    await composer.fill(text);
+    await composer.press('Enter');
+  }
   check('sending to an ended session continues it', await until(async () => (await thread()).includes('echo: picking this back up')));
+  check('messages sent while it starts up all show, with replies', await until(async () => (await thread()).includes('echo: are you there?') && (await thread()).includes('echo: hello?')));
+  check('…and it is resumed once, not as extra empty sessions', readdirSync(join(claudeDir, 'sessions')).length === 1);
   check('and keeps the earlier conversation', (await thread()).includes('echo: typed in iTerm'));
 
   // Claude calls the new-chat tool ("let's discuss this in a separate chat"): the request reaches

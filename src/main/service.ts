@@ -40,7 +40,7 @@ import type {
   SessionSnapshot,
   SessionState,
 } from '../shared/api.js';
-import { startBackground, stopBackground } from './background.js';
+import { findBackground, startBackground, stopBackground } from './background.js';
 import { branchContext } from './branch.js';
 import { SessionChannel, type ChannelDeps, type ChannelInfo } from './session.js';
 import { openInTerminalApp } from './terminal-app.js';
@@ -86,6 +86,8 @@ export class CompanionService {
   private mcpConfigPath: string | null = null;
   /** Restarts in progress, by the session being restarted; resolves to the restarted copy's id. */
   private restarts = new Map<string, Promise<Result<string>>>();
+  /** Chats being continued in the background, so messages sent meanwhile share the one resume. */
+  private resumes = new Map<string, Promise<Result>>();
   /** Sessions whose Companion tools have connected (their MCP server said hello). */
   private toolsUp = new Set<string>();
   private toolsEverywhere: boolean | null = null;
@@ -469,21 +471,52 @@ export class CompanionService {
           'This session runs in a plain terminal, which only that terminal can type into. Start sessions with `claude --bg` (or from Companion) to drive them from both places.',
       };
     if (ch.state.mode === 'history') {
-      const row = getSession(this.d.db, sessionId);
-      if (row?.transcriptGone) return { ok: false, error: 'Claude Code deleted this transcript, so it can no longer be continued.' };
-      if (!ch.state.cwd || !existsSync(ch.state.cwd)) return { ok: false, error: `Project folder not found: ${ch.state.cwd ?? 'unknown'}` };
-      try {
-        ch.useBackground(await startBackground(this.channelDeps, ch.state.cwd, ['--resume', sessionId]));
-      } catch (err) {
-        return { ok: false, error: `Could not continue the session: ${(err as Error).message}` };
-      }
-      if (ch.state.facts.newChatTool || this.toolsEverywhere) this.awaitTools(ch);
-      this.d.onChanged?.();
+      const resumed = await this.resume(ch);
+      if (!resumed.ok) return resumed;
     }
     // Continuing a hidden chat brings it back.
     if (this.d.db.prepare(`SELECT 1 FROM hidden_sessions WHERE session_id = ?`).get(sessionId)) this.setHidden([sessionId], false);
     ch.attach();
     ch.send(text);
+    return ok;
+  }
+
+  /**
+   * Continues a chat that isn't running as a background session. Messages sent while that is still
+   * starting wait for the same resume: a second `--resume` of a running chat would make Claude Code
+   * start a new, empty session, and the window would follow that one instead of the chat.
+   */
+  private resume(ch: SessionChannel): Promise<Result> {
+    const running = this.resumes.get(ch.sessionId);
+    if (running) return running;
+    const p = this.doResume(ch).finally(() => this.resumes.delete(ch.sessionId));
+    this.resumes.set(ch.sessionId, p);
+    return p;
+  }
+
+  private async doResume(ch: SessionChannel): Promise<Result> {
+    const sessionId = ch.sessionId;
+    const row = getSession(this.d.db, sessionId);
+    if (row?.transcriptGone) return { ok: false, error: 'Claude Code deleted this transcript, so it can no longer be continued.' };
+    if (!ch.state.cwd || !existsSync(ch.state.cwd)) return { ok: false, error: `Project folder not found: ${ch.state.cwd ?? 'unknown'}` };
+    // Already running (continued from a terminal meanwhile): use it rather than starting another.
+    let entry = findBackground(this.d.cfg.claudeDir, sessionId);
+    if (!entry) {
+      try {
+        entry = await startBackground(this.channelDeps, ch.state.cwd, ['--resume', sessionId]);
+      } catch (err) {
+        return { ok: false, error: `Could not continue the session: ${(err as Error).message}` };
+      }
+      if (entry.sessionId !== sessionId) {
+        // Claude Code started a new, empty session because the chat was running after all.
+        await stopBackground(this.channelDeps, entry.jobId);
+        entry = findBackground(this.d.cfg.claudeDir, sessionId);
+        if (!entry) return { ok: false, error: 'Could not continue the session: it is already running elsewhere.' };
+      }
+    }
+    ch.useBackground(entry);
+    if (ch.state.facts.newChatTool || this.toolsEverywhere) this.awaitTools(ch);
+    this.d.onChanged?.();
     return ok;
   }
 

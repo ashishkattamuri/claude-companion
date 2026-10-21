@@ -59,7 +59,8 @@ function startDaemon(args) {
   const resume = args.includes('--resume') ? args[args.indexOf('--resume') + 1] : null;
   // Like Claude Code: resuming a session with extra flags starts a copy, under a new id.
   const copy = resume && args.length > 2;
-  const sessionId = copy ? randomUUID() : (resume ?? randomUUID());
+  // Also like Claude Code: resuming a session that is already running starts a new, empty one.
+  const sessionId = copy || (resume && running(resume)) ? randomUUID() : (resume ?? randomUUID());
   if (copy) {
     const dir = join(claudeDir, 'projects', process.cwd().replace(/[^a-zA-Z0-9]/g, '-'));
     const from = join(dir, `${resume}.jsonl`);
@@ -67,6 +68,9 @@ function startDaemon(args) {
     console.log(`note: started a copy of that conversation as ${sessionId.slice(0, 8)}.`);
   }
   const job = sessionId.slice(0, 8);
+  // Claimed right away, before the daemon registers, as Claude Code does.
+  mkdirSync(join(claudeDir, 'fake-claims'), { recursive: true });
+  writeFileSync(join(claudeDir, 'fake-claims', sessionId), '');
   const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '__daemon', sessionId, ...args], {
     cwd: process.cwd(),
     env: process.env,
@@ -75,6 +79,10 @@ function startDaemon(args) {
   });
   child.unref();
   console.log(`backgrounded · ${job}`);
+}
+
+function running(sessionId) {
+  return existsSync(join(claudeDir, 'fake-claims', sessionId));
 }
 
 function attach(job) {
@@ -199,6 +207,7 @@ function runDaemon([sessionId, ...args]) {
   }
   function shutdown() {
     rmSync(registry, { force: true });
+    rmSync(join(claudeDir, 'fake-claims', sessionId), { force: true });
     rmSync(socketFor(job), { force: true });
     for (const c of clients) c.end();
     process.exit(0);
