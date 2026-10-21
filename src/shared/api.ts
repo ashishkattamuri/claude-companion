@@ -65,6 +65,8 @@ export interface SessionListItem extends SessionRow {
   status: SessionState['status'] | null;
   /** The chat this one was opened from. */
   parentId: string | null;
+  /** Hidden from the sidebar unless "Show hidden" is on. */
+  hidden: boolean;
 }
 
 /** Context tools and links for one session. */
@@ -116,6 +118,10 @@ export interface CompanionApi {
   /** Opens the same live session in Terminal or iTerm (`claude attach <id>`). */
   openInTerminal(sessionId: string): Promise<Result>;
   pickFolder(): Promise<string | null>;
+  /** Hides a chat and the chats opened from it, or shows them again. Transcripts are untouched. */
+  setHidden(sessionId: string, hidden: boolean): Promise<void>;
+  /** Asks to confirm, stops the chat if it runs in the background, and deletes its transcript. */
+  deleteSession(sessionId: string): Promise<Result<boolean>>;
 
   getExtras(sessionId: string): Promise<SessionExtras>;
   /** Runs /compact, keeping pinned files and the optional focus. */

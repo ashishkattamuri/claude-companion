@@ -95,6 +95,15 @@ export function App() {
         onPage={(page) => setSelection({ kind: 'page', page })}
         onSelect={(id) => setSelection({ kind: 'session', id })}
         onNew={() => setSheet({})}
+        onHide={(id, hidden) => void api.setHidden(id, hidden).then(reload)}
+        onDelete={(id) =>
+          void api.deleteSession(id).then((r) => {
+            if (!r.ok) return setToast(r.error);
+            if (!r.value) return;
+            if (selection.kind === 'session' && selection.id === id) setSelection({ kind: 'page', page: 'today' });
+            reload();
+          })
+        }
       />
       <main className="content">
         {selection.kind === 'session' && (

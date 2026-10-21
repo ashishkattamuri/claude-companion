@@ -1,5 +1,5 @@
 import { execFile, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import type { ConversationItem } from '../adapter/conversation.js';
 import type { LlmClient } from '../analyze/llm.js';
@@ -8,7 +8,7 @@ import { getRecap, recapDay } from '../analyze/recap.js';
 import { analysisNeeded, currentStatus, runJobs } from '../analyze/runner.js';
 import type { Config } from '../config.js';
 import type { LiveSession } from '../ingest/live.js';
-import { scan } from '../ingest/scanner.js';
+import { listTranscripts, scan } from '../ingest/scanner.js';
 import type { DB } from '../store/db.js';
 import { getSession, listProjects, listSessions, type SessionRow } from '../store/queries.js';
 import type { SocketRequest, SocketResponse } from '../mcp/protocol.js';
@@ -105,8 +105,9 @@ export class CompanionService {
     if (!query.search) {
       // Running sessions with no transcript yet.
       const known = new Set(rows.map((r) => r.id));
+      const deleted = this.idSet(`SELECT session_id AS id FROM deleted_sessions`);
       for (const l of live.values()) {
-        if (known.has(l.sessionId)) continue;
+        if (known.has(l.sessionId) || deleted.has(l.sessionId)) continue;
         const title = this.linkTitle(l.sessionId) ?? this.channels.get(l.sessionId)?.state.title ?? l.name ?? '(new session)';
         items.push(this.listItem(placeholderRow(l.sessionId, l.cwd, title), l));
       }
@@ -121,7 +122,11 @@ export class CompanionService {
         (r) => [r.child_id, r.parent_id],
       ),
     );
-    for (const s of items) s.parentId = parents.get(s.id) ?? null;
+    const hidden = this.idSet(`SELECT session_id AS id FROM hidden_sessions`);
+    for (const s of items) {
+      s.parentId = parents.get(s.id) ?? null;
+      s.hidden = hidden.has(s.id);
+    }
     const rank = (s: SessionListItem) => (s.status === 'waiting' ? 3 : s.attached ? 2 : s.live ? 1 : 0);
     return items.filter((s) => !superseded.has(s.id) || s.live).sort((a, b) => rank(b) - rank(a) || (b.lastTs ?? '').localeCompare(a.lastTs ?? ''));
   }
@@ -129,7 +134,105 @@ export class CompanionService {
   private listItem(row: SessionRow, live: LiveSession | null): SessionListItem {
     const ch = this.channels.get(row.id);
     const status = ch?.alive ? ch.state.status : live ? (live.status === 'busy' ? 'busy' : live.status === 'waiting' ? 'waiting' : 'idle') : null;
-    return { ...row, live, background: live?.kind === 'bg', attached: !!ch?.attached, status, parentId: null };
+    return { ...row, live, background: live?.kind === 'bg', attached: !!ch?.attached, status, parentId: null, hidden: false };
+  }
+
+  private idSet(sql: string, ...params: unknown[]): Set<string> {
+    return new Set((this.d.db.prepare(sql).all(...params) as { id: string }[]).map((r) => r.id));
+  }
+
+  // ── Cleaning up the sidebar ──────────────────────────────────────────────────────────────────
+
+  /** Hides a chat along with the chats opened from it (they're nested under it), or shows them again. */
+  setHidden(sessionId: string, hidden: boolean): void {
+    const ids = [sessionId, ...this.descendants(sessionId)];
+    const now = new Date().toISOString();
+    const stmt = hidden
+      ? this.d.db.prepare(`INSERT OR IGNORE INTO hidden_sessions(session_id, hidden_at) VALUES (?, ?)`)
+      : this.d.db.prepare(`DELETE FROM hidden_sessions WHERE session_id = ?`);
+    this.d.db.transaction(() => {
+      for (const id of ids) hidden ? stmt.run(id, now) : stmt.run(id);
+    })();
+    this.d.onChanged?.();
+  }
+
+  /** Chats opened from this one, and from those, and so on. */
+  private descendants(sessionId: string): string[] {
+    const out: string[] = [];
+    const next = this.d.db.prepare(`SELECT child_id AS id FROM session_links WHERE parent_id = ? AND kind = 'branch'`);
+    const walk = (id: string) => {
+      for (const { id: child } of next.all(id) as { id: string }[]) {
+        if (out.includes(child) || child === sessionId) continue;
+        out.push(child);
+        walk(child);
+      }
+    };
+    walk(sessionId);
+    return out;
+  }
+
+  /**
+   * Removes a chat from Companion and deletes its transcript under ~/.claude/projects. A chat that
+   * runs in the background is stopped first; one in a plain terminal has to be quit there. If the
+   * chat was restarted from an older copy, that copy (listed no more) goes too. Chats opened from
+   * it stay, and move up to the top level.
+   */
+  async deleteSession(sessionId: string): Promise<Result> {
+    const ids = [sessionId, ...this.restartedFrom(sessionId)];
+    if (ids.some((id) => !/^[\w-]+$/.test(id))) return { ok: false, error: 'Unexpected session id.' };
+    const live = this.d.loadLive();
+    for (const id of ids) {
+      const l = live.find((x) => x.sessionId === id);
+      if (this.channels.get(id)?.state.mode === 'mirror' || (l && l.kind !== 'bg'))
+        return { ok: false, error: 'This chat is running in another terminal. Quit it there, then delete it.' };
+    }
+    for (const id of ids) {
+      const jobId = this.channels.get(id)?.state.jobId ?? live.find((x) => x.sessionId === id)?.jobId;
+      if (jobId) await stopBackground(this.channelDeps, jobId);
+      this.dropChannel(id);
+      clearTimeout(this.notesTimers.get(id));
+      this.notesTimers.delete(id);
+    }
+
+    for (const id of ids) {
+      const paths = new Set(listTranscripts(this.d.cfg.projectsDir).main.filter((p) => basename(p, '.jsonl') === id));
+      const source = this.d.db.prepare(`SELECT source_path AS path FROM sessions WHERE id = ?`).get(id) as { path: string | null } | undefined;
+      if (source?.path) paths.add(source.path);
+      for (const p of paths) {
+        rmSync(p, { force: true });
+        // Subagent transcripts and tool output Claude Code keeps beside the transcript.
+        rmSync(join(dirname(p), id), { recursive: true, force: true });
+      }
+      const notes = readNotes(this.d.db, id);
+      if (notes) rmSync(notes.path, { force: true });
+    }
+
+    const now = new Date().toISOString();
+    this.d.db.transaction(() => {
+      for (const id of ids) {
+        this.d.db.prepare(`INSERT OR REPLACE INTO deleted_sessions(session_id, deleted_at) VALUES (?, ?)`).run(id, now);
+        // Messages, summaries and notes go with the session row.
+        this.d.db.prepare(`DELETE FROM sessions WHERE id = ?`).run(id);
+        this.d.db.prepare(`DELETE FROM ingest_files WHERE session_id = ?`).run(id);
+        this.d.db.prepare(`DELETE FROM session_links WHERE child_id = ? OR parent_id = ?`).run(id, id);
+        this.d.db.prepare(`DELETE FROM session_pins WHERE session_id = ?`).run(id);
+        this.d.db.prepare(`DELETE FROM hidden_sessions WHERE session_id = ?`).run(id);
+      }
+    })();
+    this.d.onChanged?.();
+    return ok;
+  }
+
+  /** The older copies a chat was restarted from (see restartWithTools). */
+  private restartedFrom(sessionId: string): string[] {
+    const out: string[] = [];
+    const prev = this.d.db.prepare(`SELECT parent_id AS id FROM session_links WHERE child_id = ? AND kind = 'restart'`);
+    for (let id = sessionId; ; ) {
+      const row = prev.get(id) as { id: string } | undefined;
+      if (!row || row.id === sessionId || out.includes(row.id)) return out;
+      out.push(row.id);
+      id = row.id;
+    }
   }
 
   listProjects() {
@@ -235,6 +338,8 @@ export class CompanionService {
       if (ch.state.facts.newChatTool || this.toolsEverywhere) this.awaitTools(ch);
       this.d.onChanged?.();
     }
+    // Continuing a hidden chat brings it back.
+    if (this.d.db.prepare(`SELECT 1 FROM hidden_sessions WHERE session_id = ?`).get(sessionId)) this.setHidden(sessionId, false);
     ch.attach();
     ch.send(text);
     return ok;

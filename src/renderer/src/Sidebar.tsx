@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { SessionListItem } from '../../shared/api';
 import { timeAgo } from './format';
 
@@ -20,12 +21,39 @@ interface Props {
   onPage: (p: Page) => void;
   onSelect: (id: string) => void;
   onNew: () => void;
+  onHide: (id: string, hidden: boolean) => void;
+  onDelete: (id: string) => void;
 }
 
-export function Sidebar({ page, sessions, selectedId, search, onSearch, onPage, onSelect, onNew }: Props) {
+type Menu = { s: SessionListItem; x: number; y: number };
+
+export function Sidebar({ page, sessions: all, selectedId, search, onSearch, onPage, onSelect, onNew, onHide, onDelete }: Props) {
+  const [showHidden, setShowHidden] = useState(false);
+  const [menu, setMenu] = useState<Menu | null>(null);
+  const hiddenCount = all.filter((s) => s.hidden).length;
+  const sessions = showHidden ? all : all.filter((s) => !s.hidden);
   const needs = sessions.filter((s) => s.status === 'waiting');
   const running = sessions.filter((s) => s.status !== 'waiting' && (s.attached || s.live));
   const earlier = sessions.filter((s) => s.status !== 'waiting' && !s.attached && !s.live).slice(0, 80);
+  const group = { selectedId, onSelect, onMenu: setMenu };
+
+  useEffect(() => {
+    if (!hiddenCount) setShowHidden(false);
+  }, [hiddenCount]);
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close();
+    window.addEventListener('mousedown', close);
+    window.addEventListener('blur', close);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', close);
+      window.removeEventListener('blur', close);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [menu]);
 
   return (
     <aside className="sidebar">
@@ -51,12 +79,12 @@ export function Sidebar({ page, sessions, selectedId, search, onSearch, onPage, 
         onChange={(e) => onSearch(e.target.value)}
       />
       <div className="sessions">
-        {search && <Group label="Matches" count={sessions.length} items={sessions} selectedId={selectedId} onSelect={onSelect} />}
+        {search && <Group label="Matches" count={sessions.length} items={sessions} {...group} />}
         {!search && (
           <>
-            {needs.length > 0 && <Group label="Needs you" count={needs.length} items={needs} selectedId={selectedId} onSelect={onSelect} />}
-            {running.length > 0 && <Group label="Running" count={running.length} items={running} selectedId={selectedId} onSelect={onSelect} />}
-            <Group label="Earlier" items={earlier} selectedId={selectedId} onSelect={onSelect} />
+            {needs.length > 0 && <Group label="Needs you" count={needs.length} items={needs} {...group} />}
+            {running.length > 0 && <Group label="Running" count={running.length} items={running} {...group} />}
+            <Group label="Earlier" items={earlier} {...group} />
           </>
         )}
       </div>
@@ -64,7 +92,37 @@ export function Sidebar({ page, sessions, selectedId, search, onSearch, onPage, 
         <span>
           {running.length + needs.length} live{needs.length ? ` · ${needs.length} need${needs.length > 1 ? '' : 's'} you` : ''}
         </span>
+        {hiddenCount > 0 && (
+          <button className="link-btn" onClick={() => setShowHidden((v) => !v)}>
+            {showHidden ? 'Hide hidden' : `Show hidden (${hiddenCount})`}
+          </button>
+        )}
       </div>
+      {menu && (
+        <div className="row-menu" role="menu" style={{ left: Math.min(menu.x, window.innerWidth - 170), top: Math.min(menu.y, window.innerHeight - 90) }} onMouseDown={(e) => e.stopPropagation()}>
+          <button
+            role="menuitem"
+            onClick={() => {
+              setMenu(null);
+              onHide(menu.s.id, !menu.s.hidden);
+            }}
+          >
+            {menu.s.hidden ? 'Show in sidebar' : 'Hide'}
+          </button>
+          <button
+            role="menuitem"
+            className="danger"
+            disabled={!!menu.s.live && !menu.s.background}
+            title={menu.s.live && !menu.s.background ? 'Running in another terminal: quit it there first' : undefined}
+            onClick={() => {
+              setMenu(null);
+              onDelete(menu.s.id);
+            }}
+          >
+            Delete…
+          </button>
+        </div>
+      )}
     </aside>
   );
 }
@@ -75,12 +133,14 @@ function Group({
   items,
   selectedId,
   onSelect,
+  onMenu,
 }: {
   label: string;
   count?: number;
   items: SessionListItem[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onMenu: (m: Menu) => void;
 }) {
   return (
     <>
@@ -90,25 +150,42 @@ function Group({
       </div>
       {items.length === 0 && <div className="muted small group-empty">Nothing here.</div>}
       {nest(items).map(({ s, depth }) => (
-        <button
-          key={s.id}
-          className={`s-row ${selectedId === s.id ? 'selected' : ''} ${depth ? 'child' : ''}`}
-          style={depth ? { paddingLeft: 8 + 16 * Math.min(depth, 3) } : undefined}
-          onClick={() => onSelect(s.id)}
-        >
-          <span className={`dot ${dotClass(s)}`} title={dotTitle(s)} />
-          <span className="s-title">
-            {depth > 0 && <span className="branch-mark" aria-hidden="true">↳ </span>}
-            {s.title}
-          </span>
-          <span className="s-time">{s.status === 'busy' ? 'now' : timeAgo(s.lastTs, Date.now(), true)}</span>
-          <span className="s-meta">
-            <span className="proj">{s.project ?? '?'}</span>
-            {s.live && !s.background && <span className="where" title="A plain claude in another terminal: view only">other terminal</span>}
-            {s.status === 'waiting' && <span className="needs-label">needs you</span>}
-            {s.transcriptGone && <span className="where">archived</span>}
-          </span>
-        </button>
+        <div key={s.id} className="s-row-wrap">
+          <button
+            className={`s-row ${selectedId === s.id ? 'selected' : ''} ${depth ? 'child' : ''} ${s.hidden ? 'hidden-row' : ''}`}
+            style={depth ? { paddingLeft: 8 + 16 * Math.min(depth, 3) } : undefined}
+            onClick={() => onSelect(s.id)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              onMenu({ s, x: e.clientX, y: e.clientY });
+            }}
+          >
+            <span className={`dot ${dotClass(s)}`} title={dotTitle(s)} />
+            <span className="s-title">
+              {depth > 0 && <span className="branch-mark" aria-hidden="true">↳ </span>}
+              {s.title}
+            </span>
+            <span className="s-time">{s.status === 'busy' ? 'now' : timeAgo(s.lastTs, Date.now(), true)}</span>
+            <span className="s-meta">
+              <span className="proj">{s.project ?? '?'}</span>
+              {s.live && !s.background && <span className="where" title="A plain claude in another terminal: view only">other terminal</span>}
+              {s.status === 'waiting' && <span className="needs-label">needs you</span>}
+              {s.transcriptGone && <span className="where">archived</span>}
+              {s.hidden && <span className="where">hidden</span>}
+            </span>
+          </button>
+          <button
+            className="s-more"
+            aria-label="More actions"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              onMenu({ s, x: r.left, y: r.bottom + 2 });
+            }}
+          >
+            ⋯
+          </button>
+        </div>
       ))}
     </>
   );

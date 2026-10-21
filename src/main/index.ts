@@ -73,6 +73,22 @@ app.whenReady().then(() => {
   ipcMain.on('session:cycleMode', (_e, id: string) => service.cyclePermissionMode(id));
   ipcMain.handle('session:stop', (_e, id: string) => service.stop(id));
   ipcMain.handle('session:openInTerminal', (_e, id: string) => service.openInTerminal(id));
+  ipcMain.handle('session:setHidden', (_e, id: string, hidden: boolean) => service.setHidden(id, hidden));
+  ipcMain.handle('session:delete', async (_e, id: string) => {
+    const s = service.listSessions({}).find((x) => x.id === id);
+    const running = !!(s?.live || s?.attached);
+    const r = await dialog.showMessageBox(win!, {
+      type: 'warning',
+      message: `Delete "${s?.title ?? 'this chat'}"?`,
+      detail: `${running ? 'The chat will be stopped. ' : ''}Its transcript is deleted from ~/.claude/projects and it can't be continued. Chats opened from it are kept.`,
+      buttons: [running ? 'Stop and Delete' : 'Delete', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+    });
+    if (r.response !== 0) return { ok: true, value: false };
+    const done = await service.deleteSession(id);
+    return done.ok ? { ok: true, value: true } : done;
+  });
   ipcMain.handle('term:replay', (_e, id: string) => service.replay(id));
   ipcMain.on('term:write', (_e, id: string, data: string) => service.write(id, data));
   ipcMain.on('term:resize', (_e, id: string, cols: number, rows: number) => service.resize(id, cols, rows));

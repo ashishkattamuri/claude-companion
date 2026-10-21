@@ -142,4 +142,17 @@ export const MIGRATIONS: string[] = [
     PRIMARY KEY (session_id, path)
   );
   `,
+  `
+  -- Chats you hid from the sidebar. Their transcripts are left alone.
+  CREATE TABLE hidden_sessions (
+    session_id TEXT PRIMARY KEY,
+    hidden_at  TEXT NOT NULL
+  );
+
+  -- Chats you deleted, so a transcript copy left behind is never ingested again.
+  CREATE TABLE deleted_sessions (
+    session_id TEXT PRIMARY KEY,
+    deleted_at TEXT NOT NULL
+  );
+  `,
 ];
