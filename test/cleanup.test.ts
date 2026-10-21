@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { LlmClient } from '../src/analyze/llm.js';
+import { getRecap } from '../src/analyze/recap.js';
 import { loadConfig, type Config } from '../src/config.js';
 import type { LiveSession } from '../src/ingest/live.js';
 import { CompanionService } from '../src/main/service.js';
@@ -90,6 +91,40 @@ describe('deleting chats', () => {
     expect((await svc.deleteSessions([PARENT, other])).ok).toBe(true);
     svc.refresh();
     expect(ids(svc)).toEqual([CHILD]);
+  });
+
+  it("takes a deleted chat's action items out of the recaps, keeping the rest", async () => {
+    const item = (text: string, session_id: string) => ({ text, why: 'w', priority: 'high', project: 'demo-app', session_id });
+    const recap = (day: string, sessionIds: string[], body: object) =>
+      db
+        .prepare(
+          `INSERT INTO recaps(day, window_start, window_end, session_ids, model, prompt_version, recap_json, created_at) VALUES (?, ?, ?, ?, 'sonnet', 1, ?, ?)`,
+        )
+        .run(day, `${day}T04:00:00Z`, `${day}T04:00:00Z`, JSON.stringify(sessionIds), JSON.stringify({ headline: 'h', blockers: [], ...body }), `${day}T08:00:00Z`);
+    recap('2026-10-20', [PARENT, CHILD], {
+      projects: [
+        { project: 'demo-app', summary: 's', session_ids: [PARENT, CHILD] },
+        { project: 'side-project', summary: 's', session_ids: [PARENT] },
+        { project: 'acme/api', summary: 'GitHub only', session_ids: [] },
+      ],
+      action_items: [item('from the parent', PARENT), item('from the child', CHILD), item('review #12', '')],
+    });
+    recap('2026-10-21', [CHILD], { projects: [{ project: 'demo-app', summary: 's', session_ids: [CHILD] }], action_items: [item('child only', CHILD)] });
+    const svc = service();
+    svc.refresh();
+
+    expect((await svc.deleteSessions([PARENT])).ok).toBe(true);
+    svc.refresh();
+    const day1 = getRecap(db, '2026-10-20')!;
+    expect(day1.recap.action_items.map((a) => a.text)).toEqual(['from the child', 'review #12']);
+    expect(day1.recap.projects.map((p) => [p.project, p.session_ids])).toEqual([
+      ['demo-app', [CHILD]],
+      ['acme/api', []],
+    ]);
+    expect(day1.sessionIds).toEqual([CHILD]);
+    expect(day1.prunedAt).not.toBeNull();
+    // A recap that never mentioned the chat is left as it was.
+    expect(getRecap(db, '2026-10-21')!.prunedAt).toBeNull();
   });
 
   it('deletes the transcript and keeps it gone on the next scan; children move to the top level', async () => {

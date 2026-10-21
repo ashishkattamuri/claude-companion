@@ -69,6 +69,14 @@ export function TodayView({ data, onStart, onContinue, onRegenerate, onConnector
 
       {row && (
         <>
+          {row.prunedAt && (
+            <div className="banner info">
+              <span className="grow">Deleted chats were taken out of this recap. The summary may still mention them.</span>
+              <button className="btn small" onClick={onRegenerate} disabled={running}>
+                Rewrite recap
+              </button>
+            </div>
+          )}
           <p className="headline">{row.recap.headline}</p>
           <div className="muted small">
             Covering {new Date(row.windowStart).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })} ·{' '}

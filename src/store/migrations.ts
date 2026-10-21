@@ -176,4 +176,8 @@ export const MIGRATIONS: string[] = [
     PRIMARY KEY (day, kind)
   );
   `,
+  `
+  -- When deleted chats were taken out of a recap (its prose may still mention them).
+  ALTER TABLE recaps ADD COLUMN pruned_at TEXT;
+  `,
 ];

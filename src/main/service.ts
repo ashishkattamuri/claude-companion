@@ -4,7 +4,7 @@ import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import type { ConversationItem } from '../adapter/conversation.js';
 import type { LlmClient } from '../analyze/llm.js';
 import { notesBehind, notesPath, readNotes, recentExchanges, updateNotes } from '../analyze/notes.js';
-import { getRecap, recapDay } from '../analyze/recap.js';
+import { getRecap, recapDay, removeSessionsFromRecaps } from '../analyze/recap.js';
 import { analysisNeeded, currentStatus, runJobs } from '../analyze/runner.js';
 import type { Config } from '../config.js';
 import {
@@ -252,6 +252,8 @@ export class CompanionService {
         this.d.db.prepare(`DELETE FROM session_pins WHERE session_id = ?`).run(id);
         this.d.db.prepare(`DELETE FROM hidden_sessions WHERE session_id = ?`).run(id);
       }
+      // Its action items and summaries go from the recaps too.
+      removeSessionsFromRecaps(this.d.db, ids);
     })();
     this.d.onChanged?.();
     return ok;

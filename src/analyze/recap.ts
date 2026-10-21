@@ -41,6 +41,8 @@ export interface RecapRow {
   sessionIds: string[];
   recap: Recap;
   createdAt: string;
+  /** Deleted chats were taken out after it was written; the prose may still mention them. */
+  prunedAt: string | null;
 }
 
 const SYSTEM = `You are the chief of staff for a software engineer. Write their morning recap from summaries
@@ -99,7 +101,7 @@ export function activeSessions(db: DB, start: Date, end: Date): string[] {
 
 export function getRecap(db: DB, day: string): RecapRow | null {
   const row = db
-    .prepare<[string], { day: string; window_start: string; window_end: string; session_ids: string; recap_json: string; created_at: string }>(
+    .prepare<[string], { day: string; window_start: string; window_end: string; session_ids: string; recap_json: string; created_at: string; pruned_at: string | null }>(
       `SELECT * FROM recaps WHERE day = ?`,
     )
     .get(day);
@@ -111,7 +113,45 @@ export function getRecap(db: DB, day: string): RecapRow | null {
     sessionIds: JSON.parse(row.session_ids),
     recap: Recap.parse(JSON.parse(row.recap_json)),
     createdAt: row.created_at,
+    prunedAt: row.pruned_at,
   };
+}
+
+/**
+ * Takes deleted chats out of every stored recap: their action items, their place in each project,
+ * and the session count. A project left with no sessions goes too. Items that don't come from a
+ * chat (no session id) stay. No model call; the headline and summaries are left as written.
+ * Returns the days that changed.
+ */
+export function removeSessionsFromRecaps(db: DB, sessionIds: string[], now = new Date()): string[] {
+  const gone = new Set(sessionIds);
+  const rows = db.prepare<[], { day: string; session_ids: string; recap_json: string }>(`SELECT day, session_ids, recap_json FROM recaps`).all();
+  const changed: string[] = [];
+  for (const row of rows) {
+    const ids: string[] = JSON.parse(row.session_ids);
+    const parsed = Recap.safeParse(JSON.parse(row.recap_json));
+    if (!parsed.success) continue;
+    const recap = parsed.data;
+    const items = recap.action_items.filter((a) => !gone.has(a.session_id));
+    const projects = recap.projects
+      .map((p) => ({ ...p, session_ids: p.session_ids.filter((id) => !gone.has(id)) }))
+      .filter((p, i) => p.session_ids.length > 0 || recap.projects[i]!.session_ids.length === 0);
+    const keptIds = ids.filter((id) => !gone.has(id));
+    const touched =
+      items.length !== recap.action_items.length ||
+      keptIds.length !== ids.length ||
+      projects.length !== recap.projects.length ||
+      projects.some((p, i) => p.session_ids.length !== recap.projects[i]!.session_ids.length);
+    if (!touched) continue;
+    db.prepare(`UPDATE recaps SET session_ids = ?, recap_json = ?, pruned_at = ? WHERE day = ?`).run(
+      JSON.stringify(keptIds),
+      JSON.stringify({ ...recap, action_items: items, projects }),
+      now.toISOString(),
+      row.day,
+    );
+    changed.push(row.day);
+  }
+  return changed;
 }
 
 export function recapNeeded(db: DB, cfg: Config, now = Date.now()): boolean {
