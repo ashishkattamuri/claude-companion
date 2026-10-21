@@ -26,6 +26,13 @@ writeFileSync(
   join(fixtureDir, `${SESSION}.jsonl`),
   readFileSync(join(repo, 'test/fixtures/basic.jsonl'), 'utf8').replaceAll('/work/demo-app', project),
 );
+// Two old experiments, to clean up from the sidebar.
+const OLD = ['aaaaaaaa-0000-0000-0000-00000000000a', 'bbbbbbbb-0000-0000-0000-00000000000b'];
+for (const [i, id] of OLD.entries())
+  writeFileSync(
+    join(fixtureDir, `${id}.jsonl`),
+    readFileSync(join(fixtureDir, `${SESSION}.jsonl`), 'utf8').replaceAll(SESSION, id).replaceAll('Webhook retry logic', `Old experiment ${'AB'[i]}`),
+  );
 
 const fake = join(root, 'claude-fake');
 writeFileSync(fake, `#!/bin/sh\nexec node "${join(repo, 'test/e2e/fake-claude.mjs')}" "$@"\n`, { mode: 0o755 });
@@ -180,6 +187,30 @@ try {
   check('…and starts on it right away', await until(async () => (await thread()).includes('echo: Let\'s pick up where we left off')));
   check('…and the pinned file carried over', await until(async () => (await page.locator('.rail').innerText()).includes('notes.md')));
   await page.screenshot({ path: join(shots, '5-context-tools.png') });
+
+  // Cleaning up the sidebar: hide a chat and bring it back, then delete two together.
+  const row = (title) => page.locator('.s-row', { hasText: title });
+  await row('Old experiment A').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Hide' }).click();
+  check('a hidden chat leaves the sidebar', await until(async () => (await row('Old experiment A').count()) === 0));
+  await page.getByRole('button', { name: 'Show hidden (1)' }).click();
+  check('"Show hidden" lists it again, marked hidden', await until(async () => (await row('Old experiment A').innerText()).includes('hidden')));
+  await row('Old experiment A').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Show in sidebar' }).click();
+  check('it can be shown again', await until(async () => (await page.getByRole('button', { name: /Show hidden/ }).count()) === 0 && (await row('Old experiment A').count()) === 1));
+
+  await app.evaluate(({ dialog }) => {
+    dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false }); // confirm "Delete"
+  });
+  await row('Old experiment A').click({ modifiers: ['Meta'] });
+  await row('Old experiment B').click({ modifiers: ['Meta'] });
+  check('⌘-click picks several chats', (await page.locator('.picked-bar').innerText()).includes('2 selected'));
+  await page.screenshot({ path: join(shots, '6-picked.png') });
+  await page.locator('.picked-bar').getByRole('button', { name: 'Delete…' }).click();
+  check('deleting them removes both from the sidebar', await until(async () => (await row('Old experiment').count()) === 0));
+  check('…and deletes their transcripts', OLD.every((id) => !existsSync(join(fixtureDir, `${id}.jsonl`))));
+  await new Promise((r) => setTimeout(r, 5500)); // the next background scan
+  check('…and they stay gone after a rescan', (await row('Old experiment').count()) === 0 && (await row('Webhook retry logic').count()) === 1);
 
 } catch (err) {
   console.error(err);

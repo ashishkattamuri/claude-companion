@@ -103,8 +103,14 @@ h1, h2 { text-wrap: balance; }
 .sidebar-foot .link-btn:hover { color: var(--ink); }
 .s-row-wrap { position: relative; }
 .s-row.hidden-row { opacity: 0.6; }
+.s-row.picked { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+.picked-bar { color: var(--ink); }
+.picked-actions { display: flex; gap: 12px; }
+.sidebar-foot .link-btn.danger:not(:disabled) { color: var(--red); }
+.sidebar-foot .link-btn:disabled { color: var(--faint); }
 .s-more { position: absolute; top: 5px; right: 6px; border: 0; border-radius: 6px; padding: 0 6px; line-height: 20px; background: var(--sunken); color: var(--muted); opacity: 0; }
 .s-row-wrap:hover .s-more, .s-more:focus-visible { opacity: 1; }
+.s-row-wrap:hover .s-time { visibility: hidden; }
 .s-more:hover { color: var(--ink); }
 .row-menu { position: fixed; z-index: 50; min-width: 150px; padding: 4px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); box-shadow: 0 6px 24px #00000029; display: flex; flex-direction: column; }
 .row-menu button { border: 0; background: none; text-align: left; padding: 6px 10px; border-radius: 6px; font-size: 13px; }

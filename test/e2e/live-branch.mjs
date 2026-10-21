@@ -1,15 +1,15 @@
 // Live check of "let's discuss this in a separate chat" against the real Claude Code CLI (Haiku;
 // a few cents): session notes are written, Claude opens a new chat through Companion's tool, and
 // the new chat knows the earlier conversation without showing it.
+// Runs in a sandbox (see sandbox.mjs): needs CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`.
 // Usage: npm run build && npm run test:live-branch
-import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { writeFileSync } from 'node:fs';
 import { _electron as electron } from 'playwright';
+import { liveSandbox } from './sandbox.mjs';
 
 const require = createRequire(import.meta.url);
 const pty = require('node-pty');
@@ -17,21 +17,11 @@ const pty = require('node-pty');
 const repo = fileURLToPath(new URL('../..', import.meta.url)).replace(/\/$/, '');
 const shots = join(repo, 'test/e2e/screenshots');
 mkdirSync(shots, { recursive: true });
-const scratch = mkdtempSync(join(tmpdir(), 'companion-branch-'));
-const realDb = join(homedir(), '.local/share/claude-companion/db.sqlite');
-const db = join(scratch, 'db.sqlite');
-if (existsSync(realDb)) copyFileSync(realDb, db);
-
-const cleanEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CLAUDE|ELECTRON_RUN_AS_NODE)/.test(k)));
-const env = {
-  ...cleanEnv,
-  COMPANION_DB: db,
-  COMPANION_NO_ANALYSIS: '1',
-  COMPANION_NOTES_DELAY_MS: '1500',
-  COMPANION_USER_DATA: join(scratch, 'user-data'),
-};
-const jobs = new Set();
-const startedAt = Date.now();
+// Its own Claude Code config folder, project folder and database; deleted at the end.
+const sandbox = liveSandbox('branch');
+const project = sandbox.project;
+const cleanEnv = sandbox.claudeEnv;
+const env = { ...sandbox.appEnv, COMPANION_NOTES_DELAY_MS: '1500' };
 const checks = [];
 const check = (name, ok) => {
   checks.push([name, ok]);
@@ -52,19 +42,17 @@ await page.setViewportSize({ width: 1440, height: 900 });
 const thread = () => page.locator('.thread').innerText();
 const lastReply = () => page.locator('.a-text').last().innerText();
 const composer = page.locator('.composer textarea');
-const job = async () => (await page.locator('.crumbs').innerText()).match(/claude attach ([0-9a-f]{8})/)?.[1];
 const shot = (name) => page.screenshot({ path: join(shots, `branch-${name}.png`) });
 
 try {
   await page.waitForSelector('.sidebar');
   await page.keyboard.press('Meta+n');
-  await page.selectOption('#ns-project', repo);
+  await page.selectOption('#ns-project', project);
   await page.selectOption('#ns-model', 'haiku');
   await page.selectOption('#ns-mode', 'default');
   await page.fill('#ns-prompt', 'Remember these facts for later: the cache uses Redis with a 300 second TTL, and the project codename is PELICAN-42. Reply with just: OK');
   await page.keyboard.press('Meta+Enter');
   check('the first chat replies', await until(async () => /\bOK\b/.test(await lastReply())));
-  jobs.add(await job());
   const parentTitle = await page.locator('.head h1').innerText();
 
   check('session notes are written after the turn', await until(async () => (await page.locator('.rail').innerText()).includes('Updated'), 120000));
@@ -75,7 +63,6 @@ try {
   await composer.fill("Let's brainstorm cache eviction policies in a separate chat.");
   await composer.press('Enter');
   check('Claude opens a new chat and Companion switches to it', await until(async () => (await page.locator('.head h1').innerText()) !== parentTitle && (await page.locator('.crumbs').innerText()).includes('from')));
-  jobs.add(await job());
   check('the new chat starts on its opening message right away', await until(async () => (await page.locator('.u-msg').count()) >= 1 && (await page.locator('.a-text').count()) >= 1));
   const opening = await page.locator('.u-msg .u-text').first().innerText();
   console.log(`  opening message: "${opening}"`);
@@ -96,11 +83,11 @@ try {
 
   // A plain `claude` in another terminal (as in iTerm), with Companion's tool registered the way
   // `companion tools install` does it. Asking there opens the new chat in Companion.
-  const mcpConfig = join(scratch, 'user-mcp.json');
-  writeFileSync(mcpConfig, JSON.stringify({ mcpServers: { companion: { command: require('electron'), args: [join(repo, 'dist/cli.js'), 'mcp'], env: { ELECTRON_RUN_AS_NODE: '1', COMPANION_DB: db } } } }));
+  const mcpConfig = join(sandbox.root, 'user-mcp.json');
+  writeFileSync(mcpConfig, JSON.stringify({ mcpServers: { companion: { command: require('electron'), args: [join(repo, 'dist/cli.js'), 'mcp'], env: { ELECTRON_RUN_AS_NODE: '1', COMPANION_CONFIG: env.COMPANION_CONFIG, COMPANION_DB: env.COMPANION_DB } } } }));
   const before = await page.locator('.head h1').innerText();
   const iterm = pty.spawn('claude', ['--model', 'haiku', '--mcp-config', mcpConfig, '--allowedTools', 'mcp__companion__start_new_chat'], {
-    cols: 120, rows: 40, cwd: repo, env: { ...cleanEnv, TERM: 'xterm-256color' },
+    cols: 120, rows: 40, cwd: project, env: { ...cleanEnv, TERM: 'xterm-256color' },
   });
   let screen = '';
   iterm.onData((d) => (screen += d));
@@ -110,7 +97,6 @@ try {
   await new Promise((r) => setTimeout(r, 400));
   iterm.write('\r');
   check('asking in a plain terminal opens the new chat in Companion', await until(async () => (await page.locator('.head h1').innerText()) !== before && (await page.locator('.u-msg').count()) >= 1, 120000));
-  jobs.add(await job());
   await shot('5-from-terminal');
   iterm.kill();
 
@@ -120,13 +106,8 @@ try {
   await shot('error').catch(() => {});
 } finally {
   await app.close().catch(() => app.process().kill());
-  // Stop every background session this run started in the repo, including copies and new chats.
-  try {
-    for (const a of JSON.parse(execFileSync('claude', ['agents', '--json'], { env: cleanEnv, encoding: 'utf8' })))
-      if (a.kind === 'background' && a.cwd === repo && a.startedAt >= startedAt) jobs.add(a.id);
-  } catch {}
-  for (const j of jobs) if (j) try { execFileSync('claude', ['stop', j], { env: cleanEnv, stdio: 'ignore' }); } catch {}
-  rmSync(scratch, { recursive: true, force: true });
+  // Stop every background session the run started, including copies and new chats, and delete the sandbox.
+  if (sandbox.cleanup().length) checks.push(['no sessions left behind in ~/.claude', false]);
 }
 
 const failed = checks.filter(([, ok]) => !ok);

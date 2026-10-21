@@ -143,9 +143,9 @@ export class CompanionService {
 
   // ── Cleaning up the sidebar ──────────────────────────────────────────────────────────────────
 
-  /** Hides a chat along with the chats opened from it (they're nested under it), or shows them again. */
-  setHidden(sessionId: string, hidden: boolean): void {
-    const ids = [sessionId, ...this.descendants(sessionId)];
+  /** Hides chats along with the chats opened from them (they're nested under them), or shows them again. */
+  setHidden(sessionIds: string[], hidden: boolean): void {
+    const ids = sessionIds.flatMap((id) => [id, ...this.descendants(id)]);
     const now = new Date().toISOString();
     const stmt = hidden
       ? this.d.db.prepare(`INSERT OR IGNORE INTO hidden_sessions(session_id, hidden_at) VALUES (?, ?)`)
@@ -169,6 +169,17 @@ export class CompanionService {
     };
     walk(sessionId);
     return out;
+  }
+
+  /** Deletes several chats; ones that can't be deleted yet are skipped and named in the error. */
+  async deleteSessions(sessionIds: string[]): Promise<Result> {
+    const failed: string[] = [];
+    for (const id of sessionIds) {
+      const r = await this.deleteSession(id);
+      if (!r.ok) failed.push(sessionIds.length === 1 ? r.error : `${getSession(this.d.db, id)?.title ?? id}: ${r.error}`);
+    }
+    if (!failed.length) return ok;
+    return { ok: false, error: sessionIds.length === 1 ? failed[0]! : `Not deleted (${failed.length}): ${failed.join(' · ')}` };
   }
 
   /**
@@ -339,7 +350,7 @@ export class CompanionService {
       this.d.onChanged?.();
     }
     // Continuing a hidden chat brings it back.
-    if (this.d.db.prepare(`SELECT 1 FROM hidden_sessions WHERE session_id = ?`).get(sessionId)) this.setHidden(sessionId, false);
+    if (this.d.db.prepare(`SELECT 1 FROM hidden_sessions WHERE session_id = ?`).get(sessionId)) this.setHidden([sessionId], false);
     ch.attach();
     ch.send(text);
     return ok;

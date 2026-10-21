@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type MouseEvent } from 'react';
 import type { SessionListItem } from '../../shared/api';
 import { timeAgo } from './format';
 
@@ -21,21 +21,39 @@ interface Props {
   onPage: (p: Page) => void;
   onSelect: (id: string) => void;
   onNew: () => void;
-  onHide: (id: string, hidden: boolean) => void;
-  onDelete: (id: string) => void;
+  onHide: (ids: string[], hidden: boolean) => void;
+  /** Resolves true once the chats are gone (false if cancelled or refused). */
+  onDelete: (ids: string[]) => Promise<boolean>;
 }
 
-type Menu = { s: SessionListItem; x: number; y: number };
+type Row = { s: SessionListItem; depth: number };
+type Menu = { ids: string[]; x: number; y: number };
 
 export function Sidebar({ page, sessions: all, selectedId, search, onSearch, onPage, onSelect, onNew, onHide, onDelete }: Props) {
   const [showHidden, setShowHidden] = useState(false);
   const [menu, setMenu] = useState<Menu | null>(null);
+  /** Chats picked with ⌘-click or shift-click, to hide or delete together. */
+  const [picked, setPicked] = useState<string[]>([]);
+  const [anchor, setAnchor] = useState<string | null>(null);
   const hiddenCount = all.filter((s) => s.hidden).length;
   const sessions = showHidden ? all : all.filter((s) => !s.hidden);
   const needs = sessions.filter((s) => s.status === 'waiting');
   const running = sessions.filter((s) => s.status !== 'waiting' && (s.attached || s.live));
   const earlier = sessions.filter((s) => s.status !== 'waiting' && !s.attached && !s.live).slice(0, 80);
-  const group = { selectedId, onSelect, onMenu: setMenu };
+  const groups: { label: string; count?: number; rows: Row[] }[] = search
+    ? [{ label: 'Matches', count: sessions.length, rows: nest(sessions) }]
+    : [
+        ...(needs.length ? [{ label: 'Needs you', count: needs.length, rows: nest(needs) }] : []),
+        ...(running.length ? [{ label: 'Running', count: running.length, rows: nest(running) }] : []),
+        { label: 'Earlier', rows: nest(earlier) },
+      ];
+  const order = groups.flatMap((g) => g.rows.map((r) => r.s.id));
+  const shown = new Set(order);
+  const chosen = picked.filter((id) => shown.has(id));
+  const byId = new Map(all.map((s) => [s.id, s]));
+  const allHidden = (ids: string[]) => ids.every((id) => byId.get(id)?.hidden);
+  /** A plain claude in another terminal can't be stopped from here. */
+  const blocked = (ids: string[]) => ids.some((id) => byId.get(id)?.live && !byId.get(id)?.background);
 
   useEffect(() => {
     if (!hiddenCount) setShowHidden(false);
@@ -54,6 +72,37 @@ export function Sidebar({ page, sessions: all, selectedId, search, onSearch, onP
       window.removeEventListener('keydown', onKey);
     };
   }, [menu]);
+
+  useEffect(() => {
+    if (!chosen.length) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setPicked([]);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [chosen.length]);
+
+  const click = (e: MouseEvent, id: string) => {
+    if (e.metaKey || e.ctrlKey) {
+      setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+      setAnchor(id);
+    } else if (e.shiftKey) {
+      const to = order.indexOf(id);
+      const from = order.indexOf(anchor ?? selectedId ?? id);
+      const range = from < 0 ? [id] : order.slice(Math.min(from, to), Math.max(from, to) + 1);
+      setPicked((p) => [...new Set([...p, ...range])]);
+    } else {
+      setPicked([]);
+      setAnchor(id);
+      onSelect(id);
+    }
+  };
+  // Opened on a picked chat, the menu acts on all of them; otherwise on that row alone.
+  const openMenu = (id: string, x: number, y: number) => setMenu({ ids: chosen.includes(id) ? chosen : [id], x, y });
+  const hide = (ids: string[]) => {
+    onHide(ids, !allHidden(ids));
+    setPicked([]);
+  };
+  const remove = (ids: string[]) => void onDelete(ids).then((done) => done && setPicked([]));
+  const several = (ids: string[]) => (ids.length > 1 ? ` ${ids.length} chats` : '');
 
   return (
     <aside className="sidebar">
@@ -79,47 +128,70 @@ export function Sidebar({ page, sessions: all, selectedId, search, onSearch, onP
         onChange={(e) => onSearch(e.target.value)}
       />
       <div className="sessions">
-        {search && <Group label="Matches" count={sessions.length} items={sessions} {...group} />}
-        {!search && (
-          <>
-            {needs.length > 0 && <Group label="Needs you" count={needs.length} items={needs} {...group} />}
-            {running.length > 0 && <Group label="Running" count={running.length} items={running} {...group} />}
-            <Group label="Earlier" items={earlier} {...group} />
-          </>
-        )}
+        {groups.map((g) => (
+          <Group key={g.label} {...g} selectedId={selectedId} picked={chosen} onClick={click} onMenu={openMenu} />
+        ))}
       </div>
-      <div className="sidebar-foot">
-        <span>
-          {running.length + needs.length} live{needs.length ? ` · ${needs.length} need${needs.length > 1 ? '' : 's'} you` : ''}
-        </span>
-        {hiddenCount > 0 && (
-          <button className="link-btn" onClick={() => setShowHidden((v) => !v)}>
-            {showHidden ? 'Hide hidden' : `Show hidden (${hiddenCount})`}
-          </button>
-        )}
-      </div>
+      {chosen.length > 0 ? (
+        <div className="sidebar-foot picked-bar">
+          <span>{chosen.length} selected</span>
+          <span className="picked-actions">
+            <button className="link-btn" onClick={() => hide(chosen)}>
+              {allHidden(chosen) ? 'Show' : 'Hide'}
+            </button>
+            <button
+              className="link-btn danger"
+              disabled={blocked(chosen)}
+              title={blocked(chosen) ? 'Some run in another terminal: quit them there first' : undefined}
+              onClick={() => remove(chosen)}
+            >
+              Delete…
+            </button>
+            <button className="link-btn" aria-label="Clear selection" onClick={() => setPicked([])}>
+              ✕
+            </button>
+          </span>
+        </div>
+      ) : (
+        <div className="sidebar-foot">
+          <span>
+            {running.length + needs.length} live{needs.length ? ` · ${needs.length} need${needs.length > 1 ? '' : 's'} you` : ''}
+          </span>
+          {hiddenCount > 0 && (
+            <button className="link-btn" onClick={() => setShowHidden((v) => !v)}>
+              {showHidden ? 'Hide hidden' : `Show hidden (${hiddenCount})`}
+            </button>
+          )}
+        </div>
+      )}
       {menu && (
-        <div className="row-menu" role="menu" style={{ left: Math.min(menu.x, window.innerWidth - 170), top: Math.min(menu.y, window.innerHeight - 90) }} onMouseDown={(e) => e.stopPropagation()}>
+        <div
+          className="row-menu"
+          role="menu"
+          style={{ left: Math.min(menu.x, window.innerWidth - 170), top: Math.min(menu.y, window.innerHeight - 90) }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
           <button
             role="menuitem"
             onClick={() => {
               setMenu(null);
-              onHide(menu.s.id, !menu.s.hidden);
+              hide(menu.ids);
             }}
           >
-            {menu.s.hidden ? 'Show in sidebar' : 'Hide'}
+            {allHidden(menu.ids) ? 'Show in sidebar' : 'Hide'}
+            {several(menu.ids)}
           </button>
           <button
             role="menuitem"
             className="danger"
-            disabled={!!menu.s.live && !menu.s.background}
-            title={menu.s.live && !menu.s.background ? 'Running in another terminal: quit it there first' : undefined}
+            disabled={blocked(menu.ids)}
+            title={blocked(menu.ids) ? 'Running in another terminal: quit it there first' : undefined}
             onClick={() => {
               setMenu(null);
-              onDelete(menu.s.id);
+              remove(menu.ids);
             }}
           >
-            Delete…
+            Delete{several(menu.ids)}…
           </button>
         </div>
       )}
@@ -130,17 +202,19 @@ export function Sidebar({ page, sessions: all, selectedId, search, onSearch, onP
 function Group({
   label,
   count,
-  items,
+  rows,
   selectedId,
-  onSelect,
+  picked,
+  onClick,
   onMenu,
 }: {
   label: string;
   count?: number;
-  items: SessionListItem[];
+  rows: Row[];
   selectedId: string | null;
-  onSelect: (id: string) => void;
-  onMenu: (m: Menu) => void;
+  picked: string[];
+  onClick: (e: MouseEvent, id: string) => void;
+  onMenu: (id: string, x: number, y: number) => void;
 }) {
   return (
     <>
@@ -148,16 +222,16 @@ function Group({
         <span>{label}</span>
         {count !== undefined && <span>{count}</span>}
       </div>
-      {items.length === 0 && <div className="muted small group-empty">Nothing here.</div>}
-      {nest(items).map(({ s, depth }) => (
+      {rows.length === 0 && <div className="muted small group-empty">Nothing here.</div>}
+      {rows.map(({ s, depth }) => (
         <div key={s.id} className="s-row-wrap">
           <button
-            className={`s-row ${selectedId === s.id ? 'selected' : ''} ${depth ? 'child' : ''} ${s.hidden ? 'hidden-row' : ''}`}
+            className={`s-row ${selectedId === s.id ? 'selected' : ''} ${picked.includes(s.id) ? 'picked' : ''} ${depth ? 'child' : ''} ${s.hidden ? 'hidden-row' : ''}`}
             style={depth ? { paddingLeft: 8 + 16 * Math.min(depth, 3) } : undefined}
-            onClick={() => onSelect(s.id)}
+            onClick={(e) => onClick(e, s.id)}
             onContextMenu={(e) => {
               e.preventDefault();
-              onMenu({ s, x: e.clientX, y: e.clientY });
+              onMenu(s.id, e.clientX, e.clientY);
             }}
           >
             <span className={`dot ${dotClass(s)}`} title={dotTitle(s)} />
@@ -180,7 +254,7 @@ function Group({
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               const r = e.currentTarget.getBoundingClientRect();
-              onMenu({ s, x: r.left, y: r.bottom + 2 });
+              onMenu(s.id, r.left, r.bottom + 2);
             }}
           >
             ⋯
@@ -192,11 +266,11 @@ function Group({
 }
 
 /** Puts chats opened from another chat right under it, indented, when both are in the same list. */
-function nest(items: SessionListItem[]): { s: SessionListItem; depth: number }[] {
+function nest(items: SessionListItem[]): Row[] {
   const ids = new Set(items.map((s) => s.id));
   const kids = new Map<string, SessionListItem[]>();
   for (const s of items) if (s.parentId && ids.has(s.parentId)) kids.set(s.parentId, [...(kids.get(s.parentId) ?? []), s]);
-  const out: { s: SessionListItem; depth: number }[] = [];
+  const out: Row[] = [];
   const seen = new Set<string>();
   const walk = (s: SessionListItem, depth: number) => {
     if (seen.has(s.id)) return;

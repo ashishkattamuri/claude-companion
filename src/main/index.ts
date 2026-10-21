@@ -73,20 +73,21 @@ app.whenReady().then(() => {
   ipcMain.on('session:cycleMode', (_e, id: string) => service.cyclePermissionMode(id));
   ipcMain.handle('session:stop', (_e, id: string) => service.stop(id));
   ipcMain.handle('session:openInTerminal', (_e, id: string) => service.openInTerminal(id));
-  ipcMain.handle('session:setHidden', (_e, id: string, hidden: boolean) => service.setHidden(id, hidden));
-  ipcMain.handle('session:delete', async (_e, id: string) => {
-    const s = service.listSessions({}).find((x) => x.id === id);
-    const running = !!(s?.live || s?.attached);
+  ipcMain.handle('session:setHidden', (_e, ids: string[], hidden: boolean) => service.setHidden(ids, hidden));
+  ipcMain.handle('session:delete', async (_e, ids: string[]) => {
+    const picked = service.listSessions({}).filter((x) => ids.includes(x.id));
+    const running = picked.some((s) => s.live || s.attached);
+    const what = ids.length === 1 ? `"${picked[0]?.title ?? 'this chat'}"` : `${ids.length} chats`;
     const r = await dialog.showMessageBox(win!, {
       type: 'warning',
-      message: `Delete "${s?.title ?? 'this chat'}"?`,
-      detail: `${running ? 'The chat will be stopped. ' : ''}Its transcript is deleted from ~/.claude/projects and it can't be continued. Chats opened from it are kept.`,
+      message: `Delete ${what}?`,
+      detail: `${running ? 'Running chats will be stopped. ' : ''}${ids.length === 1 ? 'Its transcript is' : 'Their transcripts are'} deleted from ~/.claude/projects and can't be continued. Chats opened from ${ids.length === 1 ? 'it' : 'them'} are kept.`,
       buttons: [running ? 'Stop and Delete' : 'Delete', 'Cancel'],
       defaultId: 1,
       cancelId: 1,
     });
     if (r.response !== 0) return { ok: true, value: false };
-    const done = await service.deleteSession(id);
+    const done = await service.deleteSessions(ids);
     return done.ok ? { ok: true, value: true } : done;
   });
   ipcMain.handle('term:replay', (_e, id: string) => service.replay(id));

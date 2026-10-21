@@ -118,10 +118,10 @@ export interface CompanionApi {
   /** Opens the same live session in Terminal or iTerm (`claude attach <id>`). */
   openInTerminal(sessionId: string): Promise<Result>;
   pickFolder(): Promise<string | null>;
-  /** Hides a chat and the chats opened from it, or shows them again. Transcripts are untouched. */
-  setHidden(sessionId: string, hidden: boolean): Promise<void>;
-  /** Asks to confirm, stops the chat if it runs in the background, and deletes its transcript. */
-  deleteSession(sessionId: string): Promise<Result<boolean>>;
+  /** Hides chats and the chats opened from them, or shows them again. Transcripts are untouched. */
+  setHidden(sessionIds: string[], hidden: boolean): Promise<void>;
+  /** Asks to confirm, stops chats that run in the background, and deletes their transcripts. */
+  deleteSessions(sessionIds: string[]): Promise<Result<boolean>>;
 
   getExtras(sessionId: string): Promise<SessionExtras>;
   /** Runs /compact, keeping pinned files and the optional focus. */

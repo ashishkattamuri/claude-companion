@@ -66,7 +66,7 @@ describe('hiding chats', () => {
   it('hides a chat and the chats opened from it, across restarts', () => {
     const svc = service();
     svc.refresh();
-    svc.setHidden(PARENT, true);
+    svc.setHidden([PARENT], true);
     expect(svc.listSessions({}).filter((s) => s.hidden).map((s) => s.id).sort()).toEqual([PARENT, CHILD]);
 
     db.close();
@@ -75,13 +75,23 @@ describe('hiding chats', () => {
     again.refresh();
     expect(again.listSessions({}).every((s) => s.hidden)).toBe(true);
 
-    again.setHidden(PARENT, false);
+    again.setHidden([PARENT], false);
     expect(again.listSessions({}).some((s) => s.hidden)).toBe(false);
     expect(existsSync(join(projectDir, `${PARENT}.jsonl`))).toBe(true);
   });
 });
 
 describe('deleting chats', () => {
+  it('deletes several at once', async () => {
+    const other = '33333333-3333-3333-3333-333333333333';
+    transcript(other);
+    const svc = service();
+    svc.refresh();
+    expect((await svc.deleteSessions([PARENT, other])).ok).toBe(true);
+    svc.refresh();
+    expect(ids(svc)).toEqual([CHILD]);
+  });
+
   it('deletes the transcript and keeps it gone on the next scan; children move to the top level', async () => {
     const svc = service();
     svc.refresh();

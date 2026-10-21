@@ -95,15 +95,16 @@ export function App() {
         onPage={(page) => setSelection({ kind: 'page', page })}
         onSelect={(id) => setSelection({ kind: 'session', id })}
         onNew={() => setSheet({})}
-        onHide={(id, hidden) => void api.setHidden(id, hidden).then(reload)}
-        onDelete={(id) =>
-          void api.deleteSession(id).then((r) => {
-            if (!r.ok) return setToast(r.error);
-            if (!r.value) return;
-            if (selection.kind === 'session' && selection.id === id) setSelection({ kind: 'page', page: 'today' });
-            reload();
-          })
-        }
+        onHide={(ids, hidden) => void api.setHidden(ids, hidden).then(reload)}
+        onDelete={async (ids) => {
+          const r = await api.deleteSessions(ids);
+          if (!r.ok) setToast(r.error);
+          // Some may be gone even when others were refused; leave the open one if it was deleted.
+          const open = selection.kind === 'session' && ids.includes(selection.id) ? selection.id : null;
+          if (open && !(await api.listSessions({})).some((s) => s.id === open)) setSelection({ kind: 'page', page: 'today' });
+          reload();
+          return r.ok && r.value;
+        }}
       />
       <main className="content">
         {selection.kind === 'session' && (

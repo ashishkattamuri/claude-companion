@@ -1,12 +1,13 @@
 // Live end-to-end check against the real Claude Code CLI (uses Haiku; costs a few cents).
 // Drives a session from the conversation view and from the terminal, and checks both stay in sync.
-// Usage: npm run build && node test/e2e/live.mjs   (screenshots in test/e2e/screenshots/live-*.png)
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+// Runs in a sandbox (see sandbox.mjs): needs CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`.
+// Usage: npm run build && npm run test:live   (screenshots in test/e2e/screenshots/live-*.png)
+import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { _electron as electron } from 'playwright';
+import { liveSandbox } from './sandbox.mjs';
 
 // Runs on Electron's Node (npm run test:live) so it can open a real second terminal with node-pty.
 const require = createRequire(import.meta.url);
@@ -16,17 +17,12 @@ const { Terminal } = require('@xterm/headless');
 const repo = fileURLToPath(new URL('../..', import.meta.url));
 const shots = join(repo, 'test/e2e/screenshots');
 mkdirSync(shots, { recursive: true });
-const scratch = mkdtempSync(join(tmpdir(), 'companion-live-'));
-const realDb = join(homedir(), '.local/share/claude-companion/db.sqlite');
-const db = join(scratch, 'db.sqlite');
-if (existsSync(realDb)) copyFileSync(realDb, db);
-const probeDir = '/tmp/companion-e2e-dir';
-rmSync(probeDir, { recursive: true, force: true });
-
-const jobs = new Set();
-const cleanEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CLAUDE|ELECTRON_RUN_AS_NODE)/.test(k)));
-const env = { ...process.env, COMPANION_DB: db, COMPANION_NO_ANALYSIS: '1', COMPANION_USER_DATA: join(scratch, 'user-data') };
-delete env.ELECTRON_RUN_AS_NODE;
+// Its own Claude Code config folder, project folder and database; deleted at the end.
+const sandbox = liveSandbox('live');
+const project = sandbox.project;
+const cleanEnv = sandbox.claudeEnv;
+const env = sandbox.appEnv;
+const probeDir = join(sandbox.root, 'probe-dir');
 
 const checks = [];
 const check = (name, ok) => {
@@ -53,7 +49,7 @@ try {
 
   // 1. Start a session from the UI.
   await page.keyboard.press('Meta+n');
-  await page.selectOption('#ns-project', repo.replace(/\/$/, ''));
+  await page.selectOption('#ns-project', project);
   await page.selectOption('#ns-model', 'haiku');
   await page.fill('#ns-prompt', 'Reply with exactly the word READY and nothing else.');
   await shot('1-new-session');
@@ -87,9 +83,8 @@ try {
   // 4. A second terminal (iTerm's role) attaches with `claude attach` and drives the same session.
   const job = (await page.locator('.crumbs').innerText()).match(/claude attach ([0-9a-f]{8})/)?.[1];
   check('header shows the attach command', !!job);
-  jobs.add(job);
   const screen = new Terminal({ cols: 110, rows: 36, allowProposedApi: true });
-  const iterm = pty.spawn('claude', ['attach', job], { cols: 110, rows: 36, cwd: repo, env: { ...cleanEnv, TERM: 'xterm-256color' } });
+  const iterm = pty.spawn('claude', ['attach', job], { cols: 110, rows: 36, cwd: project, env: { ...cleanEnv, TERM: 'xterm-256color' } });
   iterm.onData((d) => screen.write(d));
   const itermText = () => {
     const b = screen.buffer.active;
@@ -122,8 +117,6 @@ try {
   await composer.press('Enter');
   check('sending to an ended session resumes it', await until(async () => (await page.locator('.a-text').last().innerText()).includes('CONTINUED')));
   check('earlier messages are still there', (await thread()).includes('FROM-ITERM'));
-  const resumedJob = (await page.locator('.crumbs').innerText()).match(/claude attach ([0-9a-f]{8})/)?.[1];
-  if (resumedJob) jobs.add(resumedJob);
   await page.getByRole('button', { name: 'End', exact: true }).click();
   await until(async () => (await page.locator('.status-pill').innerText()).includes('Not running'), 15000);
 
@@ -144,11 +137,8 @@ try {
   await shot('error').catch(() => {});
 } finally {
   await app.close().catch(() => app.process().kill());
-  // Quitting Companion leaves background sessions running; stop the ones this test started.
-  const { execFileSync } = await import('node:child_process');
-  for (const j of jobs) if (j) try { execFileSync('claude', ['stop', j], { env: cleanEnv, stdio: 'ignore' }); } catch {}
-  rmSync(scratch, { recursive: true, force: true });
-  rmSync(probeDir, { recursive: true, force: true });
+  // Quitting Companion leaves background sessions running; stop them and delete the sandbox.
+  if (sandbox.cleanup().length) checks.push(['no sessions left behind in ~/.claude', false]);
 }
 
 const failed = checks.filter(([, ok]) => !ok);
