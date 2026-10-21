@@ -94,7 +94,7 @@ export function SessionWorkspace({
         <div className={`panes ${mode}`}>
           {mode !== 'terminal' && (
             <div className="convo-pane">
-              <Conversation items={items} state={state} sentFromApp={view.sentFromApp} onAnswer={(key) => api.answer(sessionId, key)} />
+              <Conversation items={items} state={state} sentFromApp={view.sentFromApp} onAnswer={(key) => api.answer(sessionId, key)} onShowTerminal={() => setMode('split')} />
               <Composer
                 state={state}
                 draft={draft}

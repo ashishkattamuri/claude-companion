@@ -24,7 +24,9 @@ export type ScreenPrompt =
       question: string;
       header: string | null;
       options: { key: string; label: string; selected: boolean }[];
-    };
+    }
+  /** Any other dialog or menu (e.g. /plugin): shown as drawn, answered with arrow keys, Enter and Esc. */
+  | { kind: 'menu'; lines: string[] };
 
 /**
  * How the window can drive the session:

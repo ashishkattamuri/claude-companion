@@ -85,6 +85,17 @@ export function detectPrompt(lines: string[]): ScreenPrompt | null {
   return { kind, question, options, header };
 }
 
+/**
+ * A dialog we can't read (e.g. the /plugin menu), as drawn: the visible lines without blank
+ * margins or runs of blank lines, so the window can show it while it waits for keys.
+ */
+export function menuPrompt(lines: string[]): ScreenPrompt {
+  const out: string[] = [];
+  for (const l of lines.map((x) => x.trimEnd())) if (l || (out.length && out.at(-1))) out.push(l);
+  while (out.length && !out.at(-1)) out.pop();
+  return { kind: 'menu', lines: out.slice(-40) };
+}
+
 /** The dialog title Claude Code draws above a permission prompt, e.g. "Bash command". */
 function findHeader(lines: string[], from: number): string | null {
   for (let i = from - 1; i >= Math.max(0, from - 14); i--) {

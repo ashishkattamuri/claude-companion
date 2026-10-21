@@ -5,7 +5,7 @@ import * as pty from 'node-pty';
 import { ConversationParser } from '../adapter/conversation.js';
 import type { SessionMode, SessionSnapshot, SessionState } from '../shared/api.js';
 import { findBackground, isAlive, readBackground, type BackgroundEntry } from './background.js';
-import { detectPrompt, Screen } from './screen.js';
+import { detectPrompt, menuPrompt, Screen } from './screen.js';
 import { TranscriptTail } from './transcript.js';
 
 const POLL_MS = 250;
@@ -267,9 +267,11 @@ export class SessionChannel extends EventEmitter {
     // it does, even if nothing new was drawn since.
     if (this.attached && (this.screenDirty || (entry.status === 'waiting' && !prompt))) {
       this.screenDirty = false;
-      const found = detectPrompt(this.att!.screen.lines());
+      const lines = this.att!.screen.lines();
+      const found = detectPrompt(lines);
       // A numbered list in Claude's own reply looks like a menu; only trust it while Claude Code says it's waiting.
-      prompt = found && (found.kind === 'trust' || entry.status === 'waiting') ? found : null;
+      // Waiting on a dialog we can't read (e.g. /plugin): show it as drawn, to be answered with keys.
+      prompt = found && (found.kind === 'trust' || entry.status === 'waiting') ? found : entry.status === 'waiting' ? menuPrompt(lines) : null;
     } else if (!this.attached || (prompt && prompt.kind !== 'trust' && entry.status !== 'waiting')) {
       prompt = null;
     }

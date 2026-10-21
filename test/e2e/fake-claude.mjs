@@ -153,7 +153,31 @@ function runDaemon([sessionId, ...args]) {
   // when the session was started with Companion's MCP config, or it's registered for all sessions.
   let listedTools = false;
   const hasTool = args.includes('--mcp-config') || existsSync(join(claudeDir, 'fake-mcp.json')) && readFileSync(join(claudeDir, 'fake-mcp.json'), 'utf8').includes('companion');
+  // `/plugin` opens a full-screen menu driven by arrow keys, Enter and Esc, with no numbers.
+  const MENU = ['Browse and install plugins', 'Manage installed plugins', 'Add marketplace'];
+  let menu = null;
+  const drawMenu = () =>
+    out(`\x1b[2J\x1b[H Plugins\n\n${MENU.map((m, i) => `${i === menu ? ' ❯ ' : '   '}${m}`).join('\n')}\n\n ↑↓ to navigate · Enter to select · Esc to go back\n`);
+  function closeMenu(note) {
+    menu = null;
+    out(`\x1b[2J\x1b[H${note}\n\n❯ `);
+    status('idle');
+  }
+  function menuKeys(chunk) {
+    if (chunk.includes('\x1b[A')) menu = (menu + MENU.length - 1) % MENU.length;
+    else if (chunk.includes('\x1b[B')) menu = (menu + 1) % MENU.length;
+    else if (chunk.includes('\r')) return closeMenu(`(chose: ${MENU[menu]})`);
+    else if (chunk === '\x1b') return closeMenu('(plugin menu closed)');
+    drawMenu();
+  }
+
   async function handle(prompt) {
+    if (prompt === '/plugin') {
+      menu = 0;
+      drawMenu();
+      setTimeout(() => menu !== null && status('waiting', 'dialog open'), 300);
+      return;
+    }
     if (!listedTools) {
       listedTools = true;
       record({ type: 'attachment', attachment: { type: 'deferred_tools_delta', addedNames: ['WebSearch', ...(hasTool ? ['mcp__companion__start_new_chat'] : [])], removedNames: [] } });
@@ -192,6 +216,7 @@ function runDaemon([sessionId, ...args]) {
   }
   function input(chunk) {
     if (chunk.includes('\x00STOP')) return shutdown();
+    if (menu !== null) return menuKeys(chunk);
     for (const ch of chunk.replace(/\x1b\[200~|\x1b\[201~/g, '')) {
       if (pending && /[123]/.test(ch)) return answer(ch);
       if (ch === '\r' || ch === '\n') {

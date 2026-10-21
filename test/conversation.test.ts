@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ConversationParser } from '../src/adapter/conversation.js';
-import { detectPrompt } from '../src/main/screen.js';
+import { detectPrompt, menuPrompt } from '../src/main/screen.js';
 import { describeTool, summarizeSteps, toTurns } from '../src/renderer/src/turns.js';
 
 const line = (o: Record<string, unknown>) => JSON.stringify(o);
@@ -199,6 +199,16 @@ describe('detectPrompt', () => {
 
   it('finds nothing on an ordinary screen', () => {
     expect(detectPrompt(['⏺ Done.', '', '❯ ', '  Haiku 4.5 | 📁 claude-companion'])).toBeNull();
+  });
+});
+
+describe('menuPrompt', () => {
+  it('keeps a menu it cannot read as drawn, without blank margins or runs of blank lines', () => {
+    const screen = ['', '', ' Plugins   ', '', '', ' ❯ Browse and install plugins', '   Manage installed plugins', '', ' Esc to go back', '', ''];
+    expect(menuPrompt(screen)).toEqual({
+      kind: 'menu',
+      lines: [' Plugins', '', ' ❯ Browse and install plugins', '   Manage installed plugins', '', ' Esc to go back'],
+    });
   });
 });
 

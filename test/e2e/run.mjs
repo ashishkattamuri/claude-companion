@@ -145,6 +145,30 @@ try {
   iterm.end();
   await page.screenshot({ path: join(shots, '3-split.png') });
 
+  // A slash command that opens a menu Companion can't read (/plugin): shown as drawn, driven by keys.
+  await page.getByRole('button', { name: 'Conversation', exact: true }).click();
+  await composer.fill('/plugin');
+  await composer.press('Enter');
+  const menuCard = page.locator('.menu-card');
+  check('a menu Companion cannot read is shown as drawn', await until(async () => (await menuCard.locator('.menu-screen').innerText()).includes('❯ Browse and install plugins')));
+  await composer.fill('after the menu');
+  await composer.press('Enter');
+  check('…and says messages wait until it closes', await until(async () => (await menuCard.innerText()).includes('1 message will send once the menu is closed')));
+  await page.screenshot({ path: join(shots, '3b-menu.png') });
+  await menuCard.getByRole('button', { name: 'Down' }).click();
+  check('arrow keys move through it', await until(async () => (await menuCard.locator('.menu-screen').innerText()).includes('❯ Manage installed plugins')));
+  await menuCard.getByRole('button', { name: 'Esc · close' }).click();
+  check('Esc closes it and the chat no longer needs you', await until(async () => (await menuCard.count()) === 0 && !(await status()).includes('Needs you')));
+  check('the message typed meanwhile is sent after', await until(async () => (await thread()).includes('echo: after the menu')));
+  await composer.fill('/plugin');
+  await composer.press('Enter');
+  await until(async () => (await menuCard.count()) === 1);
+  await menuCard.getByRole('button', { name: 'Open terminal' }).click();
+  check('"Open terminal" shows the terminal next to it', await until(async () => (await page.locator('.term-pane').count()) === 1));
+  await menuCard.getByRole('button', { name: 'Enter' }).click();
+  check('Enter picks the highlighted item', await until(async () => (await page.locator('.term-pane .xterm-rows').innerText()).includes('(chose: Browse and install plugins)')));
+  await page.getByRole('button', { name: 'Conversation', exact: true }).click();
+
   await page.getByRole('button', { name: 'End', exact: true }).click();
   check('ending the session stops it', await until(async () => (await status()).includes('Not running')));
 

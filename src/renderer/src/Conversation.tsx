@@ -11,9 +11,11 @@ interface Props {
   state: SessionState;
   sentFromApp: Set<string>;
   onAnswer: (key: string) => void;
+  /** Shows the terminal next to the conversation. */
+  onShowTerminal: () => void;
 }
 
-export function Conversation({ items, state, sentFromApp, onAnswer }: Props) {
+export function Conversation({ items, state, sentFromApp, onAnswer, onShowTerminal }: Props) {
   const turns = toTurns(items);
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
@@ -57,7 +59,8 @@ export function Conversation({ items, state, sentFromApp, onAnswer }: Props) {
             <span className="via">queued · sends when Claude is ready</span>
           </div>
         ))}
-        {state.prompt && <PromptCard prompt={state.prompt} pendingTool={lastPendingTool(items)} cwd={state.cwd} onAnswer={onAnswer} />}
+        {state.prompt?.kind === 'menu' && <MenuCard lines={state.prompt.lines} queued={state.queued.length} onKey={onAnswer} onShowTerminal={onShowTerminal} />}
+        {state.prompt && state.prompt.kind !== 'menu' && <PromptCard prompt={state.prompt} pendingTool={lastPendingTool(items)} cwd={state.cwd} onAnswer={onAnswer} />}
         {state.status === 'waiting' && !state.prompt && state.mode === 'mirror' && (
           <div className="notice warn">Claude is waiting for an answer in the other terminal.</div>
         )}
@@ -259,8 +262,46 @@ function AnswerItem({ item, cwd }: { item: ConversationItem; cwd: string | null 
   return null;
 }
 
+const KEYS = { up: '\x1b[A', down: '\x1b[B', enter: '\r', esc: '\x1b' };
+
+/**
+ * A dialog Companion can't read, such as the /plugin menu: shown as Claude Code draws it, with
+ * the keys it needs. Esc closes any of them.
+ */
+function MenuCard({ lines, queued, onKey, onShowTerminal }: { lines: string[]; queued: number; onKey: (k: string) => void; onShowTerminal: () => void }) {
+  return (
+    <div className="approval menu-card">
+      <header>
+        <b>Claude Code has a menu open</b>
+        <span className="muted">Use the keys below, or the terminal</span>
+      </header>
+      <pre className="menu-screen">{lines.join('\n')}</pre>
+      <div className="actions">
+        <button className="btn" aria-label="Up" onClick={() => onKey(KEYS.up)}>
+          ↑
+        </button>
+        <button className="btn" aria-label="Down" onClick={() => onKey(KEYS.down)}>
+          ↓
+        </button>
+        <button className="btn primary" onClick={() => onKey(KEYS.enter)}>
+          Enter
+        </button>
+        <button className="btn" onClick={() => onKey(KEYS.esc)}>
+          Esc · close
+        </button>
+        <button className="btn quiet" onClick={onShowTerminal}>
+          Open terminal
+        </button>
+      </div>
+      <div className="sync-hint">
+        {queued ? `${queued} message${queued > 1 ? 's' : ''} will send once the menu is closed.` : 'Messages you type now send once the menu is closed.'}
+      </div>
+    </div>
+  );
+}
+
 /** The dialog on screen, offered here too. Whichever side answers first wins. */
-function PromptCard({ prompt, pendingTool, cwd, onAnswer }: { prompt: ScreenPrompt; pendingTool: Tool | null; cwd: string | null; onAnswer: (k: string) => void }) {
+function PromptCard({ prompt, pendingTool, cwd, onAnswer }: { prompt: Exclude<ScreenPrompt, { kind: 'menu' }>; pendingTool: Tool | null; cwd: string | null; onAnswer: (k: string) => void }) {
   if (prompt.kind === 'trust') {
     return (
       <div className="approval">
