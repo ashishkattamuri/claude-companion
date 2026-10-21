@@ -118,6 +118,25 @@ export function getRecap(db: DB, day: string): RecapRow | null {
 }
 
 /**
+ * Takes chats that are gone out of the recaps: ones deleted before deleting did this itself, or
+ * removed outside Companion. A recap only lists chats Companion knew about, so any it no longer
+ * knows is gone. Returns the days that changed.
+ */
+export function removeGoneSessionsFromRecaps(db: DB, now = new Date()): string[] {
+  const known = new Set(db.prepare<[], { id: string }>(`SELECT id FROM sessions`).all().map((r) => r.id));
+  const mentioned = new Set<string>();
+  for (const row of db.prepare<[], { session_ids: string; recap_json: string }>(`SELECT session_ids, recap_json FROM recaps`).all()) {
+    for (const id of JSON.parse(row.session_ids) as string[]) mentioned.add(id);
+    const parsed = Recap.safeParse(JSON.parse(row.recap_json));
+    if (!parsed.success) continue;
+    for (const a of parsed.data.action_items) if (a.session_id) mentioned.add(a.session_id);
+    for (const p of parsed.data.projects) for (const id of p.session_ids) mentioned.add(id);
+  }
+  const gone = [...mentioned].filter((id) => !known.has(id));
+  return gone.length ? removeSessionsFromRecaps(db, gone, now) : [];
+}
+
+/**
  * Takes deleted chats out of every stored recap: their action items, their place in each project,
  * and the session count. A project left with no sessions goes too. Items that don't come from a
  * chat (no session id) stay. No model call; the headline and summaries are left as written.

@@ -4,7 +4,7 @@ import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import type { ConversationItem } from '../adapter/conversation.js';
 import type { LlmClient } from '../analyze/llm.js';
 import { notesBehind, notesPath, readNotes, recentExchanges, updateNotes } from '../analyze/notes.js';
-import { getRecap, recapDay, removeSessionsFromRecaps } from '../analyze/recap.js';
+import { getRecap, recapDay, removeGoneSessionsFromRecaps, removeSessionsFromRecaps } from '../analyze/recap.js';
 import { analysisNeeded, currentStatus, runJobs } from '../analyze/runner.js';
 import type { Config } from '../config.js';
 import {
@@ -119,6 +119,7 @@ export class CompanionService {
 
   refresh(): void {
     scan(this.d.db, this.d.cfg);
+    removeGoneSessionsFromRecaps(this.d.db);
   }
 
   listSessions(query: { search?: string }): SessionListItem[] {

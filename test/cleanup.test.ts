@@ -127,6 +127,38 @@ describe('deleting chats', () => {
     expect(getRecap(db, '2026-10-21')!.prunedAt).toBeNull();
   });
 
+  it('also cleans up recaps for chats deleted before, or removed outside Companion', () => {
+    const before = '44444444-4444-4444-4444-444444444444';
+    db.prepare(
+      `INSERT INTO recaps(day, window_start, window_end, session_ids, model, prompt_version, recap_json, created_at) VALUES (?, ?, ?, ?, 'sonnet', 1, ?, ?)`,
+    ).run(
+      '2026-10-20',
+      '2026-10-19T04:00:00Z',
+      '2026-10-20T04:00:00Z',
+      JSON.stringify([PARENT, before]),
+      JSON.stringify({
+        headline: 'h',
+        blockers: [],
+        projects: [{ project: 'demo-app', summary: 's', session_ids: [PARENT, before] }],
+        action_items: [
+          { text: 'orphan', why: 'w', priority: 'high', project: 'demo-app', session_id: before },
+          { text: 'still here', why: 'w', priority: 'high', project: 'demo-app', session_id: PARENT },
+        ],
+      }),
+      '2026-10-20T08:00:00Z',
+    );
+    const svc = service();
+    svc.refresh();
+    const r = getRecap(db, '2026-10-20')!;
+    expect(r.recap.action_items.map((a) => a.text)).toEqual(['still here']);
+    expect(r.sessionIds).toEqual([PARENT]);
+    expect(r.prunedAt).not.toBeNull();
+    // Nothing more to do on the next scan.
+    const pruned = r.prunedAt;
+    svc.refresh();
+    expect(getRecap(db, '2026-10-20')!.prunedAt).toBe(pruned);
+  });
+
   it('deletes the transcript and keeps it gone on the next scan; children move to the top level', async () => {
     const svc = service();
     svc.refresh();
