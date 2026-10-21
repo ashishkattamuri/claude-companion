@@ -1,10 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { z } from 'zod';
 import type { ConnectorClient } from './client.js';
-import type { ClaudeServer, ServerConfig } from './servers.js';
-
-/** GitHub's hosted MCP server, read-only tools only. Claude Code can't sign in to it with OAuth, so it takes a token. */
-export const GITHUB_SERVER_URL = 'https://api.githubcopilot.com/mcp/readonly';
+import type { ClaudeServer } from './servers.js';
 
 /** The tools Companion uses. All read-only; any other tool would need approval. */
 export const GITHUB_READ_TOOLS = ['get_me', 'search_pull_requests', 'search_issues'] as const;
@@ -12,10 +9,6 @@ export const GITHUB_READ_TOOLS = ['get_me', 'search_pull_requests', 'search_issu
 export function isGitHubServer(s: ClaudeServer): boolean {
   if (s.config.url) return /^https:\/\/api\.githubcopilot\.com\/mcp(\/|$)/.test(s.config.url);
   return [s.config.command, ...(s.config.args ?? [])].some((a) => a?.includes('github-mcp-server'));
-}
-
-export function githubServerConfig(token: string): ServerConfig {
-  return { type: 'http', url: GITHUB_SERVER_URL, headers: { Authorization: `Bearer ${token}` } };
 }
 
 export const GitHubItem = z.object({

@@ -13,13 +13,19 @@ import {
   forgetServer,
   getRecapSource,
   githubOffer,
-  listConnectors,
+  listServers,
   setServerEnabled,
-  type ConnectorsView,
   type ServerView,
 } from '../connectors/index.js';
-import { githubServerConfig, isGitHubServer } from '../connectors/github.js';
-import { addClaudeServer, readClaudeServers, removeClaudeServer } from '../connectors/servers.js';
+import {
+  PluginCli,
+  type ActionResult,
+  type MarketplaceAction,
+  type PluginAction,
+  type PluginCatalog,
+  type PluginConfig,
+} from '../connectors/plugins.js';
+import { addClaudeServer, removeClaudeServer, type ServerConfig } from '../connectors/servers.js';
 import type { LiveSession } from '../ingest/live.js';
 import { listTranscripts, scan } from '../ingest/scanner.js';
 import type { DB } from '../store/db.js';
@@ -84,8 +90,10 @@ export class CompanionService {
   private toolsUp = new Set<string>();
   private toolsEverywhere: boolean | null = null;
   private checkingTools = false;
+  private plugins: PluginCli;
 
   constructor(private d: ServiceDeps) {
+    this.plugins = new PluginCli(d.claudeBin ?? process.env.COMPANION_CLAUDE_BIN ?? 'claude', d.env);
     if (d.mcp) {
       this.mcpConfigPath = join(dirname(d.cfg.dbPath), 'mcp.json');
       mkdirSync(dirname(this.mcpConfigPath), { recursive: true });
@@ -275,8 +283,63 @@ export class CompanionService {
     };
   }
 
-  listConnectors(): ConnectorsView {
-    return listConnectors(this.d.db, this.d.cfg);
+  /** Claude Code's plugin catalog and marketplaces, as `/plugin` shows them. */
+  async listPlugins(): Promise<Result<PluginCatalog>> {
+    try {
+      return { ok: true, value: await this.plugins.catalog() };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  }
+
+  /** Installs, removes, turns on or off, or updates a plugin, for every Claude Code session. */
+  async pluginAction(action: PluginAction, id: string, acceptCommand?: string): Promise<Result<ActionResult>> {
+    return this.cliResult(() => this.plugins.plugin(action, id, acceptCommand));
+  }
+
+  async marketplaceAction(action: MarketplaceAction, target?: string): Promise<Result<ActionResult>> {
+    return this.cliResult(() => this.plugins.marketplace(action, target));
+  }
+
+  async pluginDetails(id: string): Promise<Result<string>> {
+    try {
+      return { ok: true, value: await this.plugins.details(id) };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  }
+
+  async pluginConfig(id: string): Promise<Result<PluginConfig>> {
+    try {
+      return { ok: true, value: await this.plugins.config(id) };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  }
+
+  async savePluginConfig(id: string, values: Record<string, string>): Promise<Result<string[]>> {
+    try {
+      return { ok: true, value: (await this.plugins.saveConfig(id, values)).saved };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  }
+
+  /** A `--json` action's result line; "failed" comes back as an error, a command to confirm as is. */
+  private async cliResult(fn: () => Promise<ActionResult>): Promise<Result<ActionResult>> {
+    try {
+      const r = await fn();
+      this.d.onChanged?.();
+      if (r.outcome === 'ok' || r.shownCommand || r.failureCode === 'already_in_goal_state') return { ok: true, value: r };
+      return { ok: false, error: r.message ?? `Failed (${r.failureCode ?? r.outcome})` };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  }
+
+  /** MCP servers from Claude Code's settings and from enabled plugins. */
+  listServers(): ServerView[] {
+    return listServers(this.d.db, this.d.cfg);
   }
 
   async checkConnector(name: string): Promise<ServerView | null> {
@@ -286,34 +349,27 @@ export class CompanionService {
   }
 
   async setConnectorEnabled(name: string, enabled: boolean): Promise<ServerView | null> {
+    // One GitHub source at a time.
+    if (enabled) {
+      const kind = listServers(this.d.db, this.d.cfg).find((s) => s.name === name)?.kind;
+      for (const s of listServers(this.d.db, this.d.cfg))
+        if (kind && s.kind === kind && s.name !== name && s.enabled) setServerEnabled(this.d.db, this.d.cfg, s.name, false);
+    }
     setServerEnabled(this.d.db, this.d.cfg, name, enabled);
     // Turning one on checks it straight away, so the page says whether it works.
     const view = enabled ? await checkServer(this.d.db, this.d.cfg, name) : null;
     this.d.onChanged?.();
-    return view ?? listConnectors(this.d.db, this.d.cfg).connectors.find((c) => c.server?.name === name)?.server ?? null;
+    return view ?? listServers(this.d.db, this.d.cfg).find((s) => s.name === name) ?? null;
   }
 
-  /**
-   * Adds GitHub's read-only server to Claude Code, for every session, signed in with `token`. The
-   * token lives in Claude Code's settings like any server you add yourself, not in Companion.
-   */
-  async connectGitHub(token: string): Promise<Result<ServerView | null>> {
-    token = token.trim();
-    if (!/^[A-Za-z0-9_]{20,}$/.test(token)) return { ok: false, error: "That doesn't look like a GitHub token." };
-    const servers = readClaudeServers(this.d.cfg.claudeJson);
-    const taken = (n: string) => servers.find((s) => s.name === n);
-    // Replace a GitHub server of that name (e.g. a new token); never someone else's server.
-    const name = !taken('github') || isGitHubServer(taken('github')!) ? 'github' : 'github-companion';
-    const bin = this.channelDeps.claudeBin;
-    if (taken(name)) {
-      const err = removeClaudeServer(bin, this.d.env(), name);
-      if (err) return { ok: false, error: err };
-    }
-    const err = addClaudeServer(bin, this.d.env(), name, githubServerConfig(token));
+  /** Adds an MCP server to Claude Code for every session (`claude mcp add-json --scope user`). */
+  addServer(name: string, config: ServerConfig): Result {
+    if (!/^[A-Za-z0-9_.-]+$/.test(name)) return { ok: false, error: 'Use letters, numbers, dots, dashes or underscores for the name.' };
+    if (listServers(this.d.db, this.d.cfg).some((s) => s.name === name)) return { ok: false, error: `There is already a server called ${name}.` };
+    const err = addClaudeServer(this.channelDeps.claudeBin, this.d.env(), name, config);
     if (err) return { ok: false, error: err };
-    // One GitHub source: stop reading from any other GitHub server.
-    for (const s of servers) if (s.name !== name && isGitHubServer(s)) setServerEnabled(this.d.db, this.d.cfg, s.name, false);
-    return { ok: true, value: await this.setConnectorEnabled(name, true) };
+    this.d.onChanged?.();
+    return ok;
   }
 
   removeConnector(name: string): Result {

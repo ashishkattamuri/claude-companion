@@ -17,10 +17,11 @@ import {
   enabledServer,
   getRecapSource,
   githubOffer,
-  listConnectors,
+  listServers,
   setServerEnabled,
 } from '../src/connectors/index.js';
-import { expandVars, readClaudeServers } from '../src/connectors/servers.js';
+import { PluginCli } from '../src/connectors/plugins.js';
+import { expandVars, missingVars, readAllServers, readClaudeServers } from '../src/connectors/servers.js';
 import { openDb, type DB } from '../src/store/db.js';
 
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/fake-github-mcp-server.mjs', import.meta.url));
@@ -136,9 +137,11 @@ describe('connector client', () => {
 describe('connectors', () => {
   it('reads only from servers you turned on, and checks who they are signed in as', async () => {
     writeClaudeJson({ github: fakeGitHub(), other: { command: 'true' } });
-    let view = listConnectors(db, cfg);
-    expect(view.connectors.find((c) => c.kind === 'github')!.server).toMatchObject({ name: 'github', enabled: false });
-    expect(view.others.map((s) => s.name)).toEqual(['other']);
+    const view = listServers(db, cfg);
+    expect(view.map((s) => [s.name, s.kind, s.enabled])).toEqual([
+      ['github', 'github', false],
+      ['other', null, false],
+    ]);
     expect(enabledServer(db, cfg, 'github')).toBeNull();
 
     setServerEnabled(db, cfg, 'github', true);
@@ -229,5 +232,65 @@ describe('GitHub in the morning recap', () => {
     expect(getRecapSource(db, day)).not.toBeNull();
     setServerEnabled(db, cfg, 'github', false);
     expect(getRecapSource(db, day)).toBeNull();
+  });
+});
+
+describe('plugins', () => {
+  /** The fake `claude`, with its own state in the sandbox's Claude folder. */
+  function cli() {
+    const bin = join(root, 'claude-fake');
+    writeFileSync(bin, `#!/bin/sh\nexec "${process.execPath}" "${fileURLToPath(new URL('./e2e/fake-claude.mjs', import.meta.url))}" "$@"\n`, { mode: 0o755 });
+    const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', FAKE_CLAUDE_DIR: cfg.claudeDir, FAKE_GITHUB_SERVER: FAKE_SERVER, FAKE_GH_LOG: log } as Record<string, string>;
+    return new PluginCli(bin, () => env);
+  }
+
+  it('lists the whole catalog, marking what is installed', async () => {
+    const plugins = cli();
+    expect((await plugins.plugin('install', 'frontend-design@anthropic-plugin-directory')).outcome).toBe('ok');
+    const { plugins: all, marketplaces } = await plugins.catalog();
+    expect(all.length).toBeGreaterThan(70);
+    expect(marketplaces).toEqual([]);
+    expect(all.find((p) => p.name === 'frontend-design')!.installed).toMatchObject({ enabled: true });
+    expect(all.find((p) => p.name === 'github')!.installed).toBeNull();
+  });
+
+  it('reports failures and commands to confirm instead of throwing', async () => {
+    const plugins = cli();
+    expect(await plugins.plugin('install', 'nope@anthropic-plugin-directory')).toMatchObject({ outcome: 'failed', failureCode: 'not_found' });
+    const shown = await plugins.plugin('install', 'runs-a-command@anthropic-plugin-directory');
+    expect(shown.shownCommand?.command).toBe('npx some-installer --yes');
+    expect((await plugins.plugin('install', 'runs-a-command@anthropic-plugin-directory', shown.shownCommand!.sha256)).outcome).toBe('ok');
+  });
+
+  it('reads and saves plugin options', async () => {
+    const plugins = cli();
+    const id = 'code-modernization@anthropic-plugin-directory';
+    await plugins.plugin('install', id);
+    const before = await plugins.config(id);
+    expect(Object.keys(before.schema)).toEqual(['track', 'legacyDir']);
+    expect(before.choices.track).toEqual(['auto', 'transform', 'uplift']);
+    expect(await plugins.saveConfig(id, { track: 'uplift' })).toEqual({ saved: ['track'] });
+    expect((await plugins.config(id)).inputs.track).toBe('uplift');
+    await expect(plugins.saveConfig(id, { nope: 'x' })).rejects.toThrow(/no option "nope"/);
+  });
+
+  it("includes enabled plugins' MCP servers, so the GitHub plugin can feed the recap", async () => {
+    const plugins = cli();
+    await plugins.plugin('install', 'github@anthropic-plugin-directory');
+    const servers = readAllServers(cfg.claudeJson, cfg.claudeDir);
+    expect(servers.map((s) => [s.name, s.plugin])).toEqual([['plugin:github:github', 'github@anthropic-plugin-directory']]);
+    expect(isGitHubServer(servers[0]!)).toBe(true);
+    setServerEnabled(db, cfg, 'plugin:github:github', true);
+    expect(await checkServer(db, cfg, 'plugin:github:github')).toMatchObject({ status: 'connected', detail: 'Signed in as @octo' });
+
+    await plugins.plugin('disable', 'github@anthropic-plugin-directory');
+    expect(readAllServers(cfg.claudeJson, cfg.claudeDir)).toEqual([]);
+    expect(enabledServer(db, cfg, 'github')).toBeNull();
+  });
+
+  it('points out variables a server needs that are not set', () => {
+    expect(missingVars({ type: 'http', url: 'https://x', headers: { Authorization: 'Bearer ${GH_PAT}' } }, {})).toEqual(['GH_PAT']);
+    expect(missingVars({ type: 'http', url: 'https://x', headers: { Authorization: 'Bearer ${GH_PAT}' } }, { GH_PAT: 'x' })).toEqual([]);
+    expect(missingVars({ type: 'http', url: '${BASE:-https://x}' }, {})).toEqual([]);
   });
 });

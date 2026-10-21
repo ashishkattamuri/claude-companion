@@ -9,7 +9,8 @@ interface Props {
   /** Open the session an item came from, with the item ready to send. */
   onContinue: (sessionId: string, text: string) => void;
   onRegenerate: () => void;
-  onConnectors: () => void;
+  /** Opens Connectors at a tab, e.g. the GitHub plugin or your GitHub server. */
+  onConnectors: (at: { tab: 'discover' | 'servers'; search?: string }) => void;
 }
 
 export function TodayView({ data, onStart, onContinue, onRegenerate, onConnectors }: Props) {
@@ -44,11 +45,14 @@ export function TodayView({ data, onStart, onContinue, onRegenerate, onConnector
             <strong>Add GitHub to your recap?</strong>
             <div className="muted small">
               PRs waiting on your review, failing CI and new issues, read through
-              {data.githubOffer.existing ? <> your <span className="mono">{data.githubOffer.existing}</span> MCP server</> : " GitHub's MCP server"}.
+              {data.githubOffer.existing ? <> your <span className="mono">{data.githubOffer.existing}</span> MCP server</> : ' the GitHub plugin'}.
             </div>
           </div>
-          <button className="btn primary small" onClick={onConnectors}>
-            {data.githubOffer.existing ? 'Use it' : 'Connect GitHub'}
+          <button
+            className="btn primary small"
+            onClick={() => onConnectors(data.githubOffer!.existing ? { tab: 'servers' } : { tab: 'discover', search: 'github' })}
+          >
+            {data.githubOffer.existing ? 'Use it' : 'Find the GitHub plugin'}
           </button>
           <button className="btn quiet small" onClick={() => void api.dismissGithubOffer()}>
             Not now

@@ -2,27 +2,25 @@ import type { Config } from '../config.js';
 import type { DB } from '../store/db.js';
 import { ConnectorClient } from './client.js';
 import { GITHUB_READ_TOOLS, GitHubActivity, fetchGitHubActivity, githubLogin, githubRepo, isGitHubServer } from './github.js';
-import { readClaudeServers, type ClaudeServer } from './servers.js';
+import { missingVars, readAllServers, type ClaudeServer } from './servers.js';
 
 /**
- * Connectors are MCP servers from Claude Code's own list. Companion keeps only which ones it may
- * read from and how the last check went; adding, signing in and removing go through Claude Code.
- * Features ask this module for data and never talk to a server directly.
+ * Connectors are what Claude Code already has: its plugins (see plugins.ts) and the MCP servers in
+ * its settings or brought by plugins. Companion keeps only which servers it may read from and how
+ * the last check went. Features ask this module for data and never talk to a server directly.
  */
-export type ConnectorKind = 'github' | 'calendar' | 'tickets' | 'slack';
-
-export const CONNECTOR_KINDS: { kind: ConnectorKind; label: string; uses: string; available: boolean }[] = [
-  { kind: 'github', label: 'GitHub', uses: 'PRs merged or waiting on your review, failing CI and new issues, in your morning recap.', available: true },
-  { kind: 'calendar', label: 'Calendar', uses: "Today's meetings and free blocks.", available: false },
-  { kind: 'tickets', label: 'Linear / Jira', uses: 'Assigned tickets and status changes.', available: false },
-  { kind: 'slack', label: 'Slack', uses: 'Mentions and threads waiting on a reply.', available: false },
-];
+export type ConnectorKind = 'github';
 
 export interface ServerView {
   name: string;
   transport: ClaudeServer['transport'];
   target: string;
+  /** What Companion can use it for, e.g. GitHub in the morning recap. */
   kind: ConnectorKind | null;
+  /** The plugin it comes with; removed by uninstalling that plugin. */
+  plugin: string | null;
+  /** Variables its settings need that aren't set, e.g. a token. */
+  needs: string[];
   /** Companion may read from it. */
   enabled: boolean;
   status: 'connected' | 'error' | null;
@@ -31,11 +29,6 @@ export interface ServerView {
   checkedAt: string | null;
 }
 
-export interface ConnectorsView {
-  connectors: ((typeof CONNECTOR_KINDS)[number] & { server: ServerView | null })[];
-  /** Claude Code servers Companion has no use for yet. */
-  others: ServerView[];
-}
 
 export function kindOf(s: ClaudeServer): ConnectorKind | null {
   return isGitHubServer(s) ? 'github' : null;
@@ -53,13 +46,15 @@ function serverViews(db: DB, cfg: Config): ServerView[] {
   const state = new Map(
     db.prepare<[], StateRow>(`SELECT * FROM connector_servers`).all().map((r) => [r.name, r]),
   );
-  return readClaudeServers(cfg.claudeJson).map((s) => {
+  return allServers(cfg).map((s) => {
     const r = state.get(s.name);
     return {
       name: s.name,
       transport: s.transport,
       target: redact(s.target),
       kind: kindOf(s),
+      plugin: s.plugin ?? null,
+      needs: missingVars(s.config, process.env),
       enabled: !!r?.enabled,
       status: r?.status ?? null,
       detail: r?.detail ?? null,
@@ -68,14 +63,11 @@ function serverViews(db: DB, cfg: Config): ServerView[] {
   });
 }
 
-export function listConnectors(db: DB, cfg: Config): ConnectorsView {
-  const views = serverViews(db, cfg);
-  // Per kind, prefer the server Companion already reads from.
-  const pick = (kind: ConnectorKind) => views.filter((v) => v.kind === kind).sort((a, b) => Number(b.enabled) - Number(a.enabled))[0] ?? null;
-  return {
-    connectors: CONNECTOR_KINDS.map((k) => ({ ...k, server: pick(k.kind) })),
-    others: views.filter((v) => !v.kind),
-  };
+const allServers = (cfg: Config) => readAllServers(cfg.claudeJson, cfg.claudeDir);
+
+/** Claude Code's MCP servers, from its settings and from enabled plugins. */
+export function listServers(db: DB, cfg: Config): ServerView[] {
+  return serverViews(db, cfg);
 }
 
 /** Turning a server off also forgets what Companion fetched from it. */
@@ -88,7 +80,7 @@ export function setServerEnabled(db: DB, cfg: Config, name: string, enabled: boo
 
 /** Drops Companion's record of a server and the data it fetched (after it's removed, or turned off). */
 export function forgetServer(db: DB, cfg: Config, name: string, removeRow = true): void {
-  const server = readClaudeServers(cfg.claudeJson).find((s) => s.name === name);
+  const server = allServers(cfg).find((s) => s.name === name);
   const kind = server ? kindOf(server) : null;
   if (removeRow) db.prepare(`DELETE FROM connector_servers WHERE name = ?`).run(name);
   if (kind && !enabledServer(db, cfg, kind)) db.prepare(`DELETE FROM recap_sources WHERE kind = ?`).run(kind);
@@ -96,7 +88,7 @@ export function forgetServer(db: DB, cfg: Config, name: string, removeRow = true
 
 /** Connects to a server and records whether that worked. Only lists tools, except for known kinds. */
 export async function checkServer(db: DB, cfg: Config, name: string): Promise<ServerView | null> {
-  const server = readClaudeServers(cfg.claudeJson).find((s) => s.name === name);
+  const server = allServers(cfg).find((s) => s.name === name);
   if (!server) return null;
   let status: 'connected' | 'error' = 'connected';
   let detail: string;
@@ -123,7 +115,7 @@ export function enabledServer(db: DB, cfg: Config, kind: ConnectorKind): ClaudeS
   const enabled = new Set(
     db.prepare<[], { name: string }>(`SELECT name FROM connector_servers WHERE enabled = 1`).all().map((r) => r.name),
   );
-  return readClaudeServers(cfg.claudeJson).find((s) => enabled.has(s.name) && kindOf(s) === kind) ?? null;
+  return allServers(cfg).find((s) => enabled.has(s.name) && kindOf(s) === kind) ?? null;
 }
 
 export interface RecapSource {
@@ -173,13 +165,14 @@ const OFFER_KEY = 'connector_offer_dismissed:github';
 
 /**
  * Whether Today should offer GitHub: you work in GitHub repositories and Companion doesn't read
- * from GitHub yet. `existing` names a GitHub server you already have in Claude Code.
+ * from GitHub yet. `existing` names a GitHub server you already have in Claude Code; without one,
+ * the offer leads to the GitHub plugin.
  */
 export function githubOffer(db: DB, cfg: Config, recentCwds: string[]): { existing: string | null } | null {
   if (enabledServer(db, cfg, 'github')) return null;
   if (db.prepare(`SELECT 1 FROM meta WHERE key = ?`).get(OFFER_KEY)) return null;
   if (!recentCwds.some((c) => githubRepo(c))) return null;
-  return { existing: readClaudeServers(cfg.claudeJson).find(isGitHubServer)?.name ?? null };
+  return { existing: allServers(cfg).find(isGitHubServer)?.name ?? null };
 }
 
 export function dismissGithubOffer(db: DB): void {

@@ -6,7 +6,7 @@ import { loadConfig } from '../config.js';
 import { readLiveSessions } from '../ingest/live.js';
 import { socketPath } from '../mcp/protocol.js';
 import { openDb } from '../store/db.js';
-import type { NewSessionRequest } from '../shared/api.js';
+import type { MarketplaceAction, NewSessionRequest, PluginAction, ServerConfig } from '../shared/api.js';
 import { listenForSessions } from './app-socket.js';
 import { resolveShellPath, sessionEnv } from './env.js';
 import { CompanionService } from './service.js';
@@ -90,10 +90,55 @@ app.whenReady().then(() => {
     const done = await service.deleteSessions(ids);
     return done.ok ? { ok: true, value: true } : done;
   });
-  ipcMain.handle('connectors:list', () => service.listConnectors());
+  ipcMain.handle('plugins:list', () => service.listPlugins());
+  ipcMain.handle('plugins:action', async (_e, action: PluginAction, id: string) => {
+    if (action === 'uninstall') {
+      const r = await dialog.showMessageBox(win!, {
+        type: 'warning',
+        message: `Uninstall ${id}?`,
+        detail: 'It is removed from every Claude Code session, along with its saved options and data.',
+        buttons: ['Uninstall', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+      });
+      if (r.response !== 0) return { ok: true, value: null };
+    }
+    const r = await service.pluginAction(action, id);
+    // A plugin that installs by running a command: show the command, and run it only on a yes.
+    const shown = r.ok ? r.value.shownCommand : null;
+    if (!shown) return r;
+    const confirm = await dialog.showMessageBox(win!, {
+      type: 'warning',
+      message: `${id} installs by running a command`,
+      detail: `${shown.command ?? '(command not shown)'}\n\nRun it only if you trust this plugin and its marketplace.`,
+      buttons: ['Run and install', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+    });
+    if (confirm.response !== 0) return { ok: true, value: null };
+    return service.pluginAction(action, id, shown.sha256);
+  });
+  ipcMain.handle('plugins:marketplace', async (_e, action: MarketplaceAction, target?: string) => {
+    if (action === 'remove') {
+      const r = await dialog.showMessageBox(win!, {
+        type: 'warning',
+        message: `Remove the ${target} marketplace?`,
+        detail: 'Plugins installed from it are uninstalled too, with their saved options and data.',
+        buttons: ['Remove', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+      });
+      if (r.response !== 0) return { ok: true, value: null };
+    }
+    return service.marketplaceAction(action, target);
+  });
+  ipcMain.handle('plugins:details', (_e, id: string) => service.pluginDetails(id));
+  ipcMain.handle('plugins:config', (_e, id: string) => service.pluginConfig(id));
+  ipcMain.handle('plugins:saveConfig', (_e, id: string, values: Record<string, string>) => service.savePluginConfig(id, values));
+  ipcMain.handle('connectors:list', () => service.listServers());
   ipcMain.handle('connectors:check', (_e, name: string) => service.checkConnector(name));
   ipcMain.handle('connectors:setEnabled', (_e, name: string, enabled: boolean) => service.setConnectorEnabled(name, enabled));
-  ipcMain.handle('connectors:connectGitHub', (_e, token: string) => service.connectGitHub(token));
+  ipcMain.handle('connectors:add', (_e, name: string, config: ServerConfig) => service.addServer(name, config));
   ipcMain.handle('connectors:dismissOffer', () => service.dismissGithubOffer());
   ipcMain.handle('connectors:remove', async (_e, name: string) => {
     const r = await dialog.showMessageBox(win!, {

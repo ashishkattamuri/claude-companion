@@ -34,22 +34,14 @@ for (const [i, id] of OLD.entries())
     readFileSync(join(fixtureDir, `${SESSION}.jsonl`), 'utf8').replaceAll(SESSION, id).replaceAll('Webhook retry logic', `Old experiment ${'AB'[i]}`),
   );
 
-// The project is a GitHub repository, and Claude Code has a GitHub MCP server (a fake one) plus
-// another server Companion has no use for.
+// The project is a GitHub repository, and Claude Code has one MCP server Companion has no use for.
+// Installing the (fake) GitHub plugin brings a fake GitHub MCP server.
 {
   const { execFileSync } = await import('node:child_process');
   execFileSync('git', ['init', '-q', project]);
   execFileSync('git', ['-C', project, 'remote', 'add', 'origin', 'https://github.com/acme/demo-app.git']);
 }
-writeFileSync(
-  join(claudeDir, '.claude.json'),
-  JSON.stringify({
-    mcpServers: {
-      github: { type: 'stdio', command: process.execPath, args: [join(repo, 'test/fixtures/fake-github-mcp-server.mjs')], env: { FAKE_GH_LOG: join(root, 'gh-calls.log') } },
-      notes: { type: 'stdio', command: 'true', args: [] },
-    },
-  }),
-);
+writeFileSync(join(claudeDir, '.claude.json'), JSON.stringify({ mcpServers: { notes: { type: 'stdio', command: 'true', args: [] } } }));
 
 const fake = join(root, 'claude-fake');
 writeFileSync(fake, `#!/bin/sh\nexec node "${join(repo, 'test/e2e/fake-claude.mjs')}" "$@"\n`, { mode: 0o755 });
@@ -66,6 +58,8 @@ const env = {
   COMPANION_SOCKET: join(root, 'app.sock'),
   COMPANION_USER_DATA: join(root, 'user-data'),
   FAKE_CLAUDE_DIR: claudeDir,
+  FAKE_GITHUB_SERVER: join(repo, 'test/fixtures/fake-github-mcp-server.mjs'),
+  FAKE_GH_LOG: join(root, 'gh-calls.log'),
 };
 delete env.ELECTRON_RUN_AS_NODE;
 
@@ -229,36 +223,87 @@ try {
   await new Promise((r) => setTimeout(r, 5500)); // the next background scan
   check('…and they stay gone after a rescan', (await row('Old experiment').count()) === 0 && (await row('Webhook retry logic').count()) === 1);
 
-  // Connectors: offered on Today, turned on and off, removed from Claude Code.
+  // Connectors: Claude Code's /plugin as a page.
+  await app.evaluate(({ dialog }) => {
+    globalThis.dialogs = [];
+    dialog.showMessageBox = async (_w, o) => (globalThis.dialogs.push(o.message), { response: 0, checkboxChecked: false }); // confirm
+  });
+  const dialogs = () => app.evaluate(() => globalThis.dialogs);
   const nav = (label) => page.locator('.nav button', { hasText: label }).click();
-  const github = page.locator('.connector', { hasText: 'GitHub' });
+  const cards = page.locator('.plugin-card');
+  const card = (name) => page.locator('.plugin-card', { has: page.locator('.plugin-name', { hasText: new RegExp(`^${name}$`) }) });
+  const sheet = page.locator('.plugin-sheet');
+  const tab = (label) => page.getByRole('tab', { name: new RegExp(`^${label}`) }).click();
+  const fakeState = () => JSON.parse(readFileSync(join(claudeDir, 'fake-plugins.json'), 'utf8'));
   const claudeServers = () => Object.keys(JSON.parse(readFileSync(join(claudeDir, '.claude.json'), 'utf8')).mcpServers ?? {});
+
   await nav('Today');
   const offer = page.locator('.offer');
-  check('Today offers your GitHub server for the recap', await until(async () => (await offer.innerText()).includes('github')));
-  await offer.getByRole('button', { name: 'Use it' }).click();
-  check('…which opens Connectors, with GitHub not yet used', await until(async () => (await github.innerText()).includes('Use in Companion')));
-  check('other Claude Code servers are listed apart', (await page.locator('.server-list').innerText()).includes('notes'));
-  await github.getByRole('button', { name: 'Use in Companion' }).click();
-  check('turning GitHub on connects and shows who it is signed in as', await until(async () => (await github.innerText()).includes('Signed in as @octo')));
-  check('…and marks it connected', (await github.locator('.status-pill').innerText()) === 'Connected');
-  check('…using read tools only', readFileSync(join(root, 'gh-calls.log'), 'utf8').split('\n').filter(Boolean).every((l) => JSON.parse(l).tool === 'get_me'));
+  check('Today offers GitHub for the recap', await until(async () => (await offer.innerText()).includes('GitHub plugin')));
+  await offer.getByRole('button', { name: 'Find the GitHub plugin' }).click();
+  check('…which opens Connectors searching for it', await until(async () => (await card('github').count()) === 1) && (await page.getByLabel('Search plugins').inputValue()) === 'github');
+  await page.getByLabel('Search plugins').fill('');
+  check('Discover shows the catalog as a grid, a page at a time', await until(async () => (await cards.count()) === 60));
   await page.screenshot({ path: join(shots, '7-connectors.png') });
+  await page.getByRole('button', { name: /Show more/ }).click();
+  check('…with more on request', await until(async () => (await cards.count()) === 74));
+
+  await page.getByLabel('Search plugins').fill('modern');
+  check('search narrows the grid', await until(async () => (await cards.count()) === 1));
+  await card('code-modernization').getByRole('button', { name: 'Install' }).click();
+  check('installing from a card installs it in Claude Code', await until(async () => (await card('code-modernization').innerText()).includes('Installed')) && !!fakeState().installed['code-modernization@anthropic-plugin-directory']);
+  await card('code-modernization').click();
+  check('its page shows what it adds', await until(async () => (await sheet.locator('.plugin-details').innerText()).includes('Component inventory')));
+  await sheet.locator('select').first().selectOption('uplift');
+  await sheet.getByRole('button', { name: 'Save options' }).click();
+  check('options are saved through claude plugin configure', await until(async () => fakeState().installed['code-modernization@anthropic-plugin-directory'].config.track === 'uplift'));
+  await page.screenshot({ path: join(shots, '8-plugin.png') });
+  await sheet.getByRole('button', { name: 'Disable' }).click();
+  check('it can be disabled', await until(async () => fakeState().installed['code-modernization@anthropic-plugin-directory'].enabled === false));
+  await sheet.getByRole('button', { name: 'Enable' }).click();
+  check('…and enabled again', await until(async () => fakeState().installed['code-modernization@anthropic-plugin-directory'].enabled === true));
+  await sheet.getByRole('button', { name: 'Uninstall…' }).click();
+  check('uninstalling asks first, then removes it', await until(async () => !fakeState().installed['code-modernization@anthropic-plugin-directory']) && (await dialogs()).some((m) => m.startsWith('Uninstall code-modernization')));
+  await sheet.getByRole('button', { name: 'Close' }).click();
+
+  await page.getByLabel('Search plugins').fill('runs-a-command');
+  await card('runs-a-command').getByRole('button', { name: 'Install' }).click();
+  check('a plugin that installs by running a command shows it before running it', await until(async () => !!fakeState().installed['runs-a-command@anthropic-plugin-directory']) && (await dialogs()).some((m) => m.includes('installs by running a command')));
+
+  await page.getByLabel('Search plugins').fill('github');
+  await card('github').getByRole('button', { name: 'Install' }).click();
+  await until(async () => (await card('github').innerText()).includes('Installed'));
+  await tab('Installed');
+  check('Installed lists what is installed', await until(async () => (await cards.count()) === 1) && (await card('github').count()) === 1);
+  await page.getByLabel('Search plugins').fill('');
+  await until(async () => (await cards.count()) === 2);
+  await tab('MCP servers');
+  const ghServer = page.locator('.server-row', { hasText: 'plugin:github:github' });
+  check("the GitHub plugin's MCP server is listed with Claude Code's own servers", await until(async () => (await ghServer.count()) === 1) && (await page.locator('.server-row', { hasText: 'notes' }).count()) === 1);
+  await ghServer.getByRole('button', { name: 'Use in morning recap' }).click();
+  check('…and can feed the morning recap, read-only', await until(async () => (await ghServer.innerText()).includes('Signed in as @octo')) && readFileSync(join(root, 'gh-calls.log'), 'utf8').split('\n').filter(Boolean).every((l) => JSON.parse(l).tool === 'get_me'));
+
+  await page.getByLabel('Server name').fill('docs');
+  await page.getByLabel('Server URL or command').fill('https://example.com/mcp');
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  check('an MCP server can be added to Claude Code', await until(async () => claudeServers().includes('docs')));
+  await page.locator('.server-row', { hasText: 'docs' }).getByRole('button', { name: 'Remove…' }).click();
+  check('…and removed', await until(async () => !claudeServers().includes('docs')) && claudeServers().includes('notes'));
+
+  await tab('Marketplaces');
+  await page.getByLabel('Marketplace source').fill('acme/plugins');
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  const acme = page.locator('.server-row', { hasText: 'acme-plugins' });
+  check('a marketplace can be added', await until(async () => (await acme.count()) === 1));
+  await tab('Discover');
+  await page.getByLabel('Search plugins').fill('acme');
+  check("…and its plugins show in Discover", await until(async () => (await card('acme-plugins-lint').count()) === 1));
+  await tab('Marketplaces');
+  await acme.getByRole('button', { name: 'Remove…' }).click();
+  check('…and removed, after asking', await until(async () => (await acme.count()) === 0) && (await dialogs()).some((m) => m.includes('acme-plugins marketplace')));
+
   await nav('Today');
-  check('…and Today stops offering it', await until(async () => (await offer.count()) === 0));
-  await nav('Connectors');
-  await github.getByRole('button', { name: 'Turn off' }).click();
-  check('turning it off leaves it in Claude Code', await until(async () => (await github.locator('.status-pill').innerText()) === 'Off') && claudeServers().includes('github'));
-  await github.getByRole('button', { name: 'Remove from Claude Code…' }).click(); // the confirm dialog is stubbed above
-  check('removing it takes it out of Claude Code', await until(async () => !claudeServers().includes('github')) && claudeServers().includes('notes'));
-  check('…and the page offers to connect with a token', await until(async () => (await github.locator('input[type=password]').count()) === 1));
-  await github.locator('input[type=password]').fill('not-a-token');
-  await github.getByRole('button', { name: 'Connect' }).click();
-  check('a malformed token is refused before anything is added', await until(async () => (await page.locator('.toast').innerText()).includes("doesn't look like a GitHub token")) && !claudeServers().includes('github'));
-  await nav('Today');
-  check('Today now offers to connect GitHub', await until(async () => (await offer.innerText()).includes('Connect GitHub')));
-  await offer.getByRole('button', { name: 'Not now' }).click();
-  check('…until you say not now', await until(async () => (await offer.count()) === 0));
+  check('Today stops offering GitHub once it feeds the recap', await until(async () => (await offer.count()) === 0));
 
 } catch (err) {
   console.error(err);

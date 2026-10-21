@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { NewSessionRequest, RecapView, SessionListItem } from '../../shared/api';
 import { api } from './api';
-import { ConnectorsPage } from './ConnectorsPage';
+import { ConnectorsPage, type ConnectorsTab } from './ConnectorsPage';
 import { NewSessionSheet } from './NewSessionSheet';
 import { SessionWorkspace } from './SessionWorkspace';
 import { Sidebar, type Page } from './Sidebar';
@@ -23,6 +23,7 @@ export function App() {
   const [recap, setRecap] = useState<RecapView | null>(null);
   const [sheet, setSheet] = useState<{ cwd?: string; prompt?: string } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [connectorsAt, setConnectorsAt] = useState<{ tab: ConnectorsTab; search?: string } | undefined>(undefined);
   const openId = useRef<string | null>(null);
 
   const reload = useCallback(() => {
@@ -122,10 +123,13 @@ export function App() {
             onStart={(project, sessionId, text) => setSheet({ cwd: cwdFor(project, sessionId), prompt: text })}
             onContinue={(id, text) => setSelection({ kind: 'session', id, draft: text })}
             onRegenerate={() => void api.regenerateRecap()}
-            onConnectors={() => setSelection({ kind: 'page', page: 'connectors' })}
+            onConnectors={(at) => {
+              setConnectorsAt(at);
+              setSelection({ kind: 'page', page: 'connectors' });
+            }}
           />
         )}
-        {selection.kind === 'page' && selection.page === 'connectors' && <ConnectorsPage onError={setToast} />}
+        {selection.kind === 'page' && selection.page === 'connectors' && <ConnectorsPage initial={connectorsAt} onError={setToast} />}
         {selection.kind === 'page' && selection.page !== 'today' && selection.page !== 'connectors' && (
           <div className="page">
             <div className="empty">

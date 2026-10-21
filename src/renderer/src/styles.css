@@ -283,7 +283,7 @@ button.chip:hover:not(:disabled) { color: var(--ink); }
 
 /* Today */
 .page { flex: 1; overflow-y: auto; padding: 48px 56px 64px; }
-.page > * { max-width: 860px; }
+.page > :not(.sheet-bg) { max-width: 860px; }
 .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; -webkit-app-region: drag; }
 .page-header button { -webkit-app-region: no-drag; }
 .page h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
@@ -315,21 +315,32 @@ button.chip:hover:not(:disabled) { color: var(--ink); }
 .error-text { color: var(--red); }
 
 /* Connectors */
-.connectors { display: flex; flex-direction: column; gap: 12px; }
-.connector { border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px; background: var(--surface); }
-.connector-head { display: flex; align-items: center; gap: 10px; }
-.connector h2 { font-size: 15px; font-weight: 600; }
+.connectors-page > :not(.sheet-bg) { max-width: 1180px; }
+.tabs-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
 .status-pill.red { background: var(--red-soft); color: var(--red); }
+.plugin-filters { display: flex; gap: 8px; margin-bottom: 8px; }
+.plugin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-top: 8px; }
+.plugin-card { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--surface); display: flex; flex-direction: column; gap: 8px; cursor: pointer; min-width: 0; }
+.plugin-card:hover, .plugin-card:focus-visible { border-color: var(--faint); outline: none; }
+.plugin-card-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.plugin-icon { width: 32px; height: 32px; flex-shrink: 0; border-radius: 8px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; font-weight: 600; }
+.plugin-icon.large { width: 44px; height: 44px; font-size: 18px; border-radius: 10px; }
+.plugin-name { font-weight: 600; }
+.plugin-desc { color: var(--muted); font-size: 13px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; flex: 1; }
+.plugin-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; }
+.show-more { margin: 16px auto 0; display: block; }
+.plugin-sheet { max-width: 680px; max-height: 80vh; overflow-y: auto; }
+.plugin-sheet .section { margin: 12px 0 0; }
+.plugin-options { display: flex; flex-direction: column; gap: 12px; }
+.plugin-details { font: 12px/1.5 var(--mono); background: var(--raised); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; overflow-x: auto; white-space: pre; margin: 0; }
+.wrap { flex-wrap: wrap; }
 .server-list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin-bottom: 10px; }
 .server-list:empty { display: none; }
-.server-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--raised); border-radius: 9px; min-width: 0; }
-.server-list .server-row { border-radius: 0; background: var(--surface); }
-.server-list .server-row + .server-row { border-top: 1px solid var(--line); }
+.server-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--surface); min-width: 0; }
+.server-row + .server-row { border-top: 1px solid var(--line); }
 .btn.danger { color: var(--red); }
-.token-form { display: flex; flex-direction: column; gap: 10px; }
-.steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; color: var(--muted); max-width: 70ch; }
-.steps a { color: var(--accent); }
-.input { font: 13px var(--mono); color: var(--ink); background: var(--raised); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; outline: none; }
+.add-server { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.input { font: 13px var(--sans); color: var(--ink); background: var(--raised); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; outline: none; min-width: 0; }
 .input:focus { border-color: var(--accent); }
 
 /* Sheet and toast */

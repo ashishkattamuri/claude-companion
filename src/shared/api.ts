@@ -5,13 +5,16 @@
 import type { ConversationItem, PatchHunk, SessionFacts, ToolResult } from '../adapter/conversation.js';
 import type { RecapRow } from '../analyze/recap.js';
 import type { AnalyzerStatus } from '../analyze/runner.js';
-import type { ConnectorsView, RecapSource, ServerView } from '../connectors/index.js';
+import type { RecapSource, ServerView } from '../connectors/index.js';
 import type { GitHubActivity, GitHubItem } from '../connectors/github.js';
+import type { ActionResult, CatalogPlugin, MarketplaceAction, PluginAction, PluginCatalog, PluginConfig } from '../connectors/plugins.js';
+import type { ServerConfig } from '../connectors/servers.js';
 import type { LiveSession } from '../ingest/live.js';
 import type { ProjectRow, SessionRow } from '../store/queries.js';
 
 export type { ConversationItem, PatchHunk, SessionFacts, ToolResult, ProjectRow, RecapRow, AnalyzerStatus, LiveSession };
-export type { ConnectorsView, ServerView, RecapSource, GitHubActivity, GitHubItem };
+export type { ServerView, RecapSource, GitHubActivity, GitHubItem, ServerConfig };
+export type { ActionResult, CatalogPlugin, MarketplaceAction, PluginAction, PluginCatalog, PluginConfig };
 
 /** A dialog Claude Code is showing in the terminal, offered in the UI as well. */
 export type ScreenPrompt =
@@ -145,14 +148,29 @@ export interface CompanionApi {
   restartWithTools(sessionId: string): Promise<Result<string>>;
   /** Registers the new-chat tool for every Claude session, including ones in a terminal. */
   installToolsEverywhere(): Promise<Result>;
-  /** MCP servers from Claude Code's list, by what Companion uses them for. */
-  listConnectors(): Promise<ConnectorsView>;
+  /** Claude Code's plugin catalog, installed plugins and marketplaces (what `/plugin` shows). */
+  listPlugins(): Promise<Result<PluginCatalog>>;
+  /**
+   * Installs, uninstalls, enables, disables or updates a plugin for every session. Uninstalling,
+   * and installing a plugin that runs a command, ask to confirm first; `null` means cancelled.
+   */
+  pluginAction(action: PluginAction, id: string): Promise<Result<ActionResult | null>>;
+  /** Adds (source: owner/repo, URL or path), removes (asks first) or refreshes a marketplace. */
+  marketplaceAction(action: MarketplaceAction, target?: string): Promise<Result<ActionResult | null>>;
+  /** What an installed plugin adds to sessions and its context cost (`claude plugin details`). */
+  pluginDetails(id: string): Promise<Result<string>>;
+  pluginConfig(id: string): Promise<Result<PluginConfig>>;
+  /** Saves option values; returns the ones saved. */
+  savePluginConfig(id: string, values: Record<string, string>): Promise<Result<string[]>>;
+
+  /** MCP servers from Claude Code's settings and from enabled plugins. */
+  listServers(): Promise<ServerView[]>;
   /** Connects to a server to see whether it works (and who it's signed in as). */
   checkConnector(name: string): Promise<ServerView | null>;
-  /** Lets Companion read from a server, or stops it and forgets what it fetched. */
+  /** Lets Companion read from a server (e.g. GitHub for the recap), or stops it and forgets what it fetched. */
   setConnectorEnabled(name: string, enabled: boolean): Promise<ServerView | null>;
-  /** Adds GitHub's read-only MCP server to Claude Code with this token, and turns it on. */
-  connectGitHub(token: string): Promise<Result<ServerView | null>>;
+  /** Adds an MCP server to Claude Code for every session. */
+  addServer(name: string, config: ServerConfig): Promise<Result>;
   /** Asks to confirm, then removes the server from Claude Code (`claude mcp remove`). */
   removeConnector(name: string): Promise<Result<boolean>>;
   dismissGithubOffer(): Promise<void>;

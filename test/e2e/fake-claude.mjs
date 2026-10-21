@@ -18,6 +18,10 @@ const [cmd, ...rest] = process.argv.slice(2);
 
 if (cmd === '--bg') startDaemon(rest);
 else if (cmd === 'mcp') mcp(rest);
+else if (cmd === 'plugin') {
+  const stdin = rest.includes('--values-stdin') ? readFileSync(0, 'utf8') : '';
+  (await import('./fake-plugins.mjs')).plugin(claudeDir, rest, stdin);
+}
 else if (cmd === 'attach') attach(rest[0]);
 else if (cmd === 'stop') stop(rest[0]);
 else if (cmd === '__daemon') runDaemon(rest);
