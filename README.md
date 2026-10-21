@@ -33,7 +33,7 @@ Some ways to use it:
 
 ## Everything else
 
-**Every session in one window.** Live and recent Claude Code sessions from all your projects are in the sidebar: *Needs you* (waiting for an approval or answer), *Running* and *Earlier*. Full-text search covers everything you and Claude wrote. Opening a session shows the whole conversation: your messages, Claude's replies, and its tool calls collapsed into steps you can expand to see diffs and command output.
+**Every session in one window.** Live and recent Claude Code sessions from all your projects are in the sidebar: *Needs you* (waiting for an approval or answer), *Running* and *Earlier*. Full-text search covers everything you and Claude wrote. The folder menu under the search box narrows the list to one project, its worktrees included, and is remembered across restarts. Opening a session shows the whole conversation: your messages, Claude's replies, and its tool calls collapsed into steps you can expand to see diffs and command output.
 
 **Drive a session from anywhere.** Sessions run as Claude Code background sessions (`claude --bg`), which any number of terminals can attach to. Type in Companion's composer, its terminal pane, or a terminal where you ran `claude attach <id>`: it is one live session, and every place shows the same thing. Permission prompts appear as cards in the conversation; answer them there or in any attached terminal. **Open in Terminal** opens the session in iTerm or Terminal. **End** stops it (`claude stop`), and sending a message later continues it. Quitting Companion only detaches.
 
