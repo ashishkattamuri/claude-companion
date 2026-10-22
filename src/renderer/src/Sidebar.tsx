@@ -1,6 +1,6 @@
 import { useEffect, useState, type MouseEvent } from 'react';
 import type { SessionListItem } from '../../shared/api';
-import { timeAgo } from './format';
+import { shortPath, timeAgo } from './format';
 
 export type Page = 'today' | 'ideas' | 'goals' | 'feed' | 'connectors';
 
@@ -29,14 +29,21 @@ interface Props {
 type Row = { s: SessionListItem; depth: number };
 type Menu = { ids: string[]; x: number; y: number };
 
+const FOLDER_KEY = 'sidebar.folder';
+
 export function Sidebar({ page, sessions: all, selectedId, search, onSearch, onPage, onSelect, onNew, onHide, onDelete }: Props) {
   const [showHidden, setShowHidden] = useState(false);
+  /** Only this folder's chats; empty for all folders. Kept across restarts. */
+  const [folder, setFolder] = useState(() => localStorage.getItem(FOLDER_KEY) ?? '');
   const [menu, setMenu] = useState<Menu | null>(null);
   /** Chats picked with ⌘-click or shift-click, to hide or delete together. */
   const [picked, setPicked] = useState<string[]>([]);
   const [anchor, setAnchor] = useState<string | null>(null);
-  const hiddenCount = all.filter((s) => s.hidden).length;
-  const sessions = showHidden ? all : all.filter((s) => !s.hidden);
+  const byId = new Map(all.map((s) => [s.id, s]));
+  const folders = folderOptions(showHidden ? all : all.filter((s) => !s.hidden), folder);
+  const scoped = folder ? all.filter((s) => inFolder(s, folder, byId)) : all;
+  const hiddenCount = scoped.filter((s) => s.hidden).length;
+  const sessions = showHidden ? scoped : scoped.filter((s) => !s.hidden);
   const needs = sessions.filter((s) => s.status === 'waiting');
   const running = sessions.filter((s) => s.status !== 'waiting' && (s.attached || s.live));
   const earlier = sessions.filter((s) => s.status !== 'waiting' && !s.attached && !s.live).slice(0, 80);
@@ -50,7 +57,6 @@ export function Sidebar({ page, sessions: all, selectedId, search, onSearch, onP
   const order = groups.flatMap((g) => g.rows.map((r) => r.s.id));
   const shown = new Set(order);
   const chosen = picked.filter((id) => shown.has(id));
-  const byId = new Map(all.map((s) => [s.id, s]));
   const allHidden = (ids: string[]) => ids.every((id) => byId.get(id)?.hidden);
   /** A plain claude in another terminal can't be stopped from here. */
   const blocked = (ids: string[]) => ids.some((id) => byId.get(id)?.live && !byId.get(id)?.background);
@@ -58,6 +64,11 @@ export function Sidebar({ page, sessions: all, selectedId, search, onSearch, onP
   useEffect(() => {
     if (!hiddenCount) setShowHidden(false);
   }, [hiddenCount]);
+
+  useEffect(() => {
+    if (folder) localStorage.setItem(FOLDER_KEY, folder);
+    else localStorage.removeItem(FOLDER_KEY);
+  }, [folder]);
 
   useEffect(() => {
     if (!menu) return;
@@ -127,6 +138,20 @@ export function Sidebar({ page, sessions: all, selectedId, search, onSearch, onP
         value={search}
         onChange={(e) => onSearch(e.target.value)}
       />
+      <select
+        className="folder-filter"
+        aria-label="Show chats from"
+        title={folder ? shortPath(folder) : undefined}
+        value={folder}
+        onChange={(e) => setFolder(e.target.value)}
+      >
+        <option value="">All folders</option>
+        {folders.map((f) => (
+          <option key={f.path} value={f.path}>
+            {f.label} ({f.count})
+          </option>
+        ))}
+      </select>
       <div className="sessions">
         {groups.map((g) => (
           <Group key={g.label} {...g} selectedId={selectedId} picked={chosen} onClick={click} onMenu={openMenu} />
@@ -281,6 +306,34 @@ function nest(items: SessionListItem[]): Row[] {
   for (const s of items) if (!s.parentId || !ids.has(s.parentId)) walk(s, 0);
   for (const s of items) walk(s, 0);
   return out;
+}
+
+/** The folder a chat belongs to. A worktree (`<repo>/.claude/worktrees/<name>`) belongs to its repo. */
+const folderOf = (cwd: string | null) => cwd?.replace(/[/\\]\.claude[/\\]worktrees[/\\].*$/, '') ?? null;
+
+/** In the folder, or opened from a chat that is, so child chats stay with their parent. */
+function inFolder(s: SessionListItem, folder: string, byId: Map<string, SessionListItem>): boolean {
+  const seen = new Set<string>();
+  for (let c: SessionListItem | undefined = s; c && !seen.has(c.id); c = c.parentId ? byId.get(c.parentId) : undefined) {
+    if (folderOf(c.cwd) === folder) return true;
+    seen.add(c.id);
+  }
+  return false;
+}
+
+/** Folders that have chats, with how many. The picked one stays listed even when it has none. */
+function folderOptions(items: SessionListItem[], picked: string) {
+  const counts = new Map<string, number>();
+  for (const s of items) {
+    const f = folderOf(s.cwd);
+    if (f) counts.set(f, (counts.get(f) ?? 0) + 1);
+  }
+  if (picked && !counts.has(picked)) counts.set(picked, 0);
+  const options = [...counts].map(([path, count]) => ({ path, count, name: path.split(/[/\\]/).pop() || path }));
+  // Two folders with the same name (~/work/api, ~/oss/api) are told apart by their path.
+  return options
+    .map((o) => ({ ...o, label: options.some((p) => p !== o && p.name === o.name) ? shortPath(o.path) : o.name }))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
 }
 
 const dotClass = (s: SessionListItem) =>
