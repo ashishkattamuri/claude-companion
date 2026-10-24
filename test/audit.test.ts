@@ -79,7 +79,8 @@ class Session {
   }
 }
 
-const cats = (s: Session) => s.findings().map((f) => f.category);
+/** Categories found, leaving out dead-end trails: most fixtures read things they never use. */
+const cats = (s: Session) => s.findings().map((f) => f.category).filter((c) => c !== 'M54');
 const file = (lines: number) => Array.from({ length: lines }, (_, i) => `line ${i}`).join('\n');
 
 describe('audit timeline', () => {
@@ -120,10 +121,11 @@ describe('audit timeline', () => {
   });
 
   it('numbers categories like the issue does', () => {
-    expect(CATEGORIES).toHaveLength(53);
+    expect(CATEGORIES).toHaveLength(55);
     expect(CATEGORIES.map((c) => c.id).slice(0, 3)).toEqual(['A1', 'A2', 'A3']);
     expect(CATEGORIES.find((c) => c.id === 'C17')!.group).toBe('Environment discovery');
-    expect(CATEGORIES.at(-1)!.id).toBe('L53');
+    expect(CATEGORIES.find((c) => c.id === 'L53')!.group).toBe('Edits and files');
+    expect(CATEGORIES.at(-1)!.id).toBe('M55');
   });
 });
 
@@ -250,7 +252,7 @@ describe('audit detectors', () => {
 
   it('treats viewing source as reading, not noisy output, and keeps it out of the headline total', () => {
     const r = detect(new Session().prompt('x').call(['Bash', { command: 'cat src/a.ts src/b.ts' }, 'x'.repeat(40_000)]).reply().timeline());
-    expect(r.findings).toMatchObject([{ category: 'A8', confidence: 'low' }]);
+    expect(r.findings.filter((f) => f.category !== 'M54')).toMatchObject([{ category: 'A8', confidence: 'low' }]);
     expect(r.wasted.tokens).toBe(0);
     expect(r.toReview.tokens).toBeGreaterThan(0);
   });
@@ -280,6 +282,91 @@ describe('audit detectors', () => {
       .call(['Glob', { pattern: '**/invoice.ts' }, 'src/billing/invoice.ts'])
       .reply();
     expect(cats(s)).toEqual(['A5']);
+  });
+
+  it('flags a trail of lookups whose results were never used (M54)', () => {
+    const s = new Session()
+      .prompt('Fix the retry bug in pay.ts')
+      .call(['Grep', { pattern: 'legacyRetry', path: 'src' }, 'src/old/legacyRetry.ts:4:export function legacyRetry()'])
+      .call(['Read', { file_path: '/repo/src/old/legacyRetry.ts' }, 'export function legacyRetry() { return backoffV1(3) }'])
+      .call(['Read', { file_path: '/repo/src/old/backoffV1.ts' }, 'export const backoffV1 = (n) => n * 200'])
+      .call(['Read', { file_path: '/repo/src/pay.ts' }, 'function charge() { retryOnce() }'])
+      .call(['Edit', { file_path: '/repo/src/pay.ts', old_string: 'retryOnce()', new_string: 'retryWithKey(idempotencyKey)' }, 'Updated'])
+      .reply('Switched charge() to retryWithKey.');
+    const dead = s.findings().filter((f) => f.category === 'M54');
+    expect(dead).toHaveLength(1);
+    // The grep only led to the old files, which led nowhere: all three are the dead end.
+    expect(dead[0]!.steps).toEqual([0, 1, 2]);
+  });
+
+  it("doesn't call a lookup a dead end when its result shows up in the reply", () => {
+    const s = new Session()
+      .prompt('Which release has the fix?')
+      .call(['Bash', { command: 'git tag --contains dc818c1' }, 'v0.31.0\nv0.31.1'])
+      .call(['WebFetch', { url: 'https://example.com/notes' }, 'Release v0.31.0 fixed the parser_harmony crash'])
+      .reply('It shipped in v0.31.0 (parser_harmony crash fix).');
+    expect(s.findings().filter((f) => f.category === 'M54')).toEqual([]);
+  });
+
+  it('flags code rewritten right after writing it (M55) and files created and never used (L52)', () => {
+    const block = 'function retry(n) {\n  for (let i = 0; i < n; i++) attempt();\n}';
+    const s = new Session()
+      .prompt('x')
+      .call(['Edit', { file_path: '/repo/a.ts', old_string: 'retry()', new_string: block }, 'Updated'])
+      .call(['Edit', { file_path: '/repo/a.ts', old_string: block, new_string: 'const retry = withBackoff(attempt)' }, 'Updated'])
+      .call(['Write', { file_path: '/repo/tmp_probe.py', content: 'print(1)' }, 'File created successfully at: /repo/tmp_probe.py'])
+      .reply();
+    expect(cats(s).sort()).toEqual(['L52', 'M55']);
+    expect(s.findings().find((f) => f.category === 'M55')!.steps).toEqual([0, 1]);
+  });
+
+  it("doesn't count new source files or looking at images as waste", () => {
+    const s = new Session()
+      .prompt('x')
+      .call(['Write', { file_path: '/repo/src/store/db.ts', content: 'export {}' }, 'File created successfully at: /repo/src/store/db.ts'])
+      .call(['Read', { file_path: '/repo/shots/home.png' }, '[image]'])
+      .call(['Read', { file_path: '/repo/shots/detail.png' }, '[image]'])
+      .reply('Looks right.');
+    expect(s.findings()).toEqual([]);
+  });
+
+  it('flags todo items dropped after work (H36), list churn (H38) and work outside the plan (H37)', () => {
+    const todos = (...items: [string, string][]) => ({ todos: items.map(([content, status]) => ({ content, status, activeForm: content })) });
+    const s = new Session()
+      .prompt('x')
+      .call(['TodoWrite', todos(['Add Redis cache', 'in_progress'], ['Write tests', 'pending']), 'ok'])
+      .call(['Read', { file_path: '/repo/cache.ts' }, 'export const cacheClient = null'])
+      .call(['Edit', { file_path: '/repo/cache.ts', old_string: 'null', new_string: 'createClient()' }, 'Updated'])
+      .call(['TodoWrite', todos(['Write tests', 'pending'], ['Use an in-memory LRU', 'pending']), 'ok'])
+      .call(['Edit', { file_path: '/repo/lru.ts', old_string: 'a', new_string: 'b' }, 'Updated'])
+      .call(['TodoWrite', todos(['Use an in-memory LRU', 'pending'], ['Write tests', 'pending'], ['Benchmark', 'pending']), 'ok'])
+      .call(['TodoWrite', todos(['Benchmark', 'pending'], ['Use an in-memory LRU', 'pending']), 'ok'])
+      .reply();
+    const f = s.findings();
+    expect(f.find((x) => x.category === 'H36')!.title).toMatch(/add redis cache/);
+    expect(f.find((x) => x.category === 'H38')).toMatchObject({ steps: [0, 3, 5, 6], title: expect.stringMatching(/3 times/) });
+    expect(f.find((x) => x.category === 'H37')!.steps).toEqual([4]);
+  });
+
+  it('compares the files an approved plan named with the files edited', () => {
+    const s = new Session()
+      .prompt('x')
+      .call(['ExitPlanMode', { plan: '1. Change src/pay.ts\n2. Add test/pay.test.ts\n3. Update src/config.ts' }, 'User has approved your plan.'])
+      .call(['Edit', { file_path: '/repo/src/pay.ts', old_string: 'a', new_string: 'b' }, 'Updated'])
+      .call(['Edit', { file_path: '/repo/src/server.ts', old_string: 'a', new_string: 'b' }, 'Updated'])
+      .reply();
+    const f = s.findings();
+    expect(f.find((x) => x.category === 'H36')!.title).toMatch(/pay\.test\.ts, config\.ts/);
+    expect(f.find((x) => x.category === 'H37')!.title).toMatch(/server\.ts/);
+  });
+
+  it('points the review at turns spent mostly looking around', () => {
+    const s = new Session().prompt('Find where retries happen');
+    for (let i = 0; i < 16; i++) s.call(['Read', { file_path: `/repo/src/m${i}.ts` }, `export const m${i}Value = ${i}`]);
+    s.call(['Edit', { file_path: '/repo/src/m1.ts', old_string: '1', new_string: '2' }, 'Updated']).reply();
+    s.prompt('Thanks').reply('Welcome');
+    const hints = detect(s.timeline()).hints;
+    expect(hints[0]).toMatchObject({ turn: 1, lookups: 16, edits: 1 });
   });
 
   it('counts a step flagged by two findings once in the total', () => {

@@ -171,6 +171,14 @@ program
     const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
     console.log(`Wasted: ~${k(r.wasted.tokens)} tokens, ${pct(r.wasted.share)} of the cost${usd(r.wasted.costUsd)}`);
     console.log(`To review: ~${k(r.toReview.tokens)} tokens more, ${pct(r.toReview.share)}${usd(r.toReview.costUsd)} (low confidence)\n`);
+    if (r.hints.length) {
+      console.log('Turns to look at closely:');
+      for (const h of r.hints)
+        console.log(
+          `  turn ${h.turn}: ${h.lookups} lookups, ${h.edits} edits, ${h.checks} checks, ${(h.share * 100).toFixed(0)}% of the cost · "${h.prompt.replace(/\s+/g, ' ').slice(0, 70)}"`,
+        );
+      console.log('');
+    }
     if (!r.findings.length) return console.log('Nothing flagged.');
     for (const f of r.findings) {
       const share = r.weighted ? f.weighted / r.weighted : 0;

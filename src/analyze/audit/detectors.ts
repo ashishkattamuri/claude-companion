@@ -42,6 +42,8 @@ export interface AuditReport {
   /** Low-confidence findings on top of that: likely waste, but they need the review to say. */
   toReview: Totals;
   findings: Finding[];
+  /** Turns worth a closer look in the review. */
+  hints: TurnHint[];
 }
 
 export interface Totals {
@@ -795,9 +797,340 @@ export function nearlyFull(tl: Timeline): Finding[] {
   ];
 }
 
+// ---------- M. Dead ends ----------
+
+/** Identifiers and file names: the words that show a piece of output was used later. */
+const IDENT = /[A-Za-z_$][\w$-]*(?:\.[A-Za-z0-9]{1,8})?/g;
+
+/** Specific enough to count: names with case changes, underscores, digits or an extension; not plain words. */
+const distinctive = (t: string) => t.length >= 5 && /[A-Z_$0-9.]/.test(t.slice(1)) && /[a-z]/i.test(t);
+
+const idents = (text: string) => new Set([...text.matchAll(IDENT)].map((m) => m[0]).filter(distinctive));
+
+/**
+ * Where each identifier was first seen (in anything) and last used (in Claude's own tool inputs and
+ * replies), per conversation, by call index. A result's first-seen position is just after its call.
+ */
+function usageIndex(tl: Timeline, agent: string | null, ignore: Set<number> = new Set()) {
+  const firstSeen = new Map<string, number>();
+  const lastUsed = new Map<string, number>();
+  const see = (text: string, at: number) => {
+    for (const t of idents(text)) if (!firstSeen.has(t)) firstSeen.set(t, at);
+  };
+  const use = (text: string, at: number) => {
+    for (const t of idents(text)) {
+      lastUsed.set(t, Math.max(lastUsed.get(t) ?? -1, at));
+      if (!firstSeen.has(t)) firstSeen.set(t, at);
+    }
+  };
+  const calls = tl.calls.filter((c) => c.agent === agent);
+  const messages = agent === null ? [...tl.messages] : [];
+  const texts = new Map<number, string[]>();
+  for (const t of tl.texts) if (t.agent === agent) texts.set(t.call, [...(texts.get(t.call) ?? []), t.text]);
+  for (const c of calls) {
+    while (messages.length && messages[0]!.ts <= c.ts) see(messages.shift()!.text, c.index - 0.5);
+    for (const i of c.tools) if (!ignore.has(i)) use(JSON.stringify(tl.steps[i]!.input), c.index);
+    for (const text of texts.get(c.index) ?? []) use(text, c.index);
+    for (const i of c.tools) if (tl.steps[i]!.result) see(tl.steps[i]!.result!.text, c.index + 0.5);
+  }
+  return { firstSeen, lastUsed };
+}
+
+const LOOKUPS = new Set([...READ_TOOLS, ...SUBAGENT_TOOLS]);
+
+/** Looking at an image or a PDF is checking something; there is no text in it to trace later use by. */
+const VISUAL = /\.(png|jpe?g|gif|webp|svg|pdf|bmp|tiff?)$/i;
+
+/** Where throwaway files live, or what they're called. Files elsewhere are usually the work itself. */
+const SCRATCH = /\/(tmp|temp|scratch|scratchpad)\/|^\/var\/folders\/|\/(tmp|temp|scratch|debug|probe)[_.-][^/]*$/i;
+
+const isLookup = (s: ToolStep) => LOOKUPS.has(s.name) || (command(s) !== null && readOnly(command(s)!));
+
+/**
+ * M54: reads and searches whose results never fed anything later. A result counts as used when
+ * something it introduced (a name, a path) shows up in a later tool input, edit or reply, or when
+ * the file it read is mentioned again. Runs of unused lookups are reported as one trail.
+ */
+export function deadEnds(tl: Timeline): Finding[] {
+  const out: Finding[] = [];
+  for (const steps of byThread(tl)) {
+    // A lookup whose only use was leading to other dead-end lookups is part of the dead end, so
+    // repeat without counting the dead ends' own inputs as use, until nothing changes.
+    let dead = new Set<number>();
+    for (let round = 0; round < 10; round++) {
+      const { firstSeen, lastUsed } = usageIndex(tl, steps[0]!.agent, dead);
+      const usedLater = (t: string, after: number) => (lastUsed.get(t) ?? -1) > after;
+      const next = new Set(
+        steps
+          .filter((s) => {
+            if (!ok(s) || !isLookup(s) || USER_TOOLS.has(s.name)) return false;
+            const target = filePath(s) ?? (typeof s.input.path === 'string' ? s.input.path : null);
+            if (target && VISUAL.test(target)) return false;
+            if (target && usedLater(basename(target), s.call)) return false;
+            for (const t of idents(s.result!.text)) if (firstSeen.get(t) === s.call + 0.5 && usedLater(t, s.call)) return false;
+            return true;
+          })
+          .map((s) => s.index),
+      );
+      if (next.size === dead.size) break;
+      dead = next;
+    }
+    const unused = (s: ToolStep) => dead.has(s.index);
+    let trail: ToolStep[] = [];
+    const flush = () => {
+      const tokens = trail.reduce((n, s) => n + (s.result?.tokens ?? 0), 0);
+      if (trail.length >= 2 || tokens >= 2_000)
+        out.push(
+          finding(tl, {
+            category: 'M54',
+            title: `${plural(trail.length, 'lookup')} whose results were never used (${trail.slice(0, 2).map(describe).join('; ')})`,
+            steps: trail.map((s) => s.index),
+            wasted: trail.map((s) => s.index),
+            // Whether a read was needed depends on why it was made: always a candidate for the review.
+            confidence: 'low',
+          }),
+        );
+      trail = [];
+    };
+    for (const s of steps) {
+      if (USER_TOOLS.has(s.name)) continue;
+      if (unused(s) && (trail.length === 0 || trail.at(-1)!.turn === s.turn)) trail.push(s);
+      else {
+        flush();
+        if (unused(s)) trail.push(s);
+      }
+    }
+    flush();
+  }
+  return out;
+}
+
+/**
+ * M55: code written and then replaced before it mattered (an edit whose new text a later edit
+ * rewrites away; exact undos are E27). L52: files created and never used or mentioned again.
+ */
+export function thrownAway(tl: Timeline): Finding[] {
+  const out: Finding[] = [];
+  const rewrites: [ToolStep, ToolStep][] = [];
+  const scratch: ToolStep[] = [];
+  for (const steps of byThread(tl)) {
+    const { lastUsed } = usageIndex(tl, steps[0]!.agent);
+    const edits: ToolStep[] = [];
+    const known = new Set<string>();
+    for (const s of steps) {
+      const p = filePath(s);
+      if (s.name === 'Edit' && ok(s) && p) {
+        const before = typeof s.input.old_string === 'string' ? s.input.old_string : '';
+        const after = typeof s.input.new_string === 'string' ? s.input.new_string : '';
+        const replaced = edits.find((e) => {
+          const wrote = String(e.input.new_string ?? '');
+          return filePath(e) === p && wrote.trim().length >= 30 && before.includes(wrote) && !after.includes(wrote) && e.input.old_string !== after;
+        });
+        if (replaced) rewrites.push([replaced, s]);
+        edits.push(s);
+      }
+      if (s.name === 'Write' && ok(s) && p && !known.has(p) && SCRATCH.test(p) && /created/i.test(s.result!.text)) {
+        if ((lastUsed.get(basename(p)) ?? -1) <= s.call) scratch.push(s);
+      }
+      if (p) known.add(p);
+    }
+  }
+  if (rewrites.length)
+    out.push(
+      finding(tl, {
+        category: 'M55',
+        title: `Rewrote code it had just written ${times(rewrites.length)} (${[...new Set(rewrites.map(([a]) => filePath(a)))].slice(0, 2).join(', ')})`,
+        steps: rewrites.flatMap(([a, b]) => [a.index, b.index]),
+        wasted: rewrites.map(([a]) => a.index),
+        confidence: 'low',
+      }),
+    );
+  if (scratch.length)
+    out.push(
+      finding(tl, {
+        category: 'L52',
+        title: `Created ${plural(scratch.length, 'scratch file')} never used or mentioned again (${scratch.slice(0, 3).map((s) => basename(filePath(s)!)).join(', ')})`,
+        steps: scratch.map((s) => s.index),
+        wasted: scratch.map((s) => s.index),
+        confidence: 'medium',
+      }),
+    );
+  return out;
+}
+
+// ---------- H. Plan churn ----------
+
+interface Todo {
+  content: string;
+  status: string;
+}
+
+const todoKey = (t: Todo) => normalize(t.content).toLowerCase();
+
+/**
+ * H36: todo items worked on and then dropped without being done. H38: the todo list rewritten
+ * several times in a row with nothing completed. H37: edits made while the plan had items left but
+ * none in progress. From TodoWrite; and for a plan approved in plan mode, the files it named
+ * against the files actually edited.
+ */
+export function planChurn(tl: Timeline): Finding[] {
+  const out: Finding[] = [];
+  const main = tl.steps.filter((s) => s.agent === null);
+  const versions = main.filter((s) => s.name === 'TodoWrite' && Array.isArray(s.input.todos)) as (ToolStep & { input: { todos: Todo[] } })[];
+
+  // H36
+  const started = new Map<string, ToolStep>();
+  const dropped: { item: string; from: ToolStep; to: ToolStep }[] = [];
+  versions.forEach((v, i) => {
+    const keys = new Set(v.input.todos.map(todoKey));
+    for (const [key, from] of started) {
+      if (keys.has(key)) continue;
+      const done = versions.slice(0, i).some((p) => p.input.todos.some((t) => todoKey(t) === key && t.status === 'completed'));
+      if (!done) dropped.push({ item: key, from, to: v });
+      started.delete(key);
+    }
+    for (const t of v.input.todos) {
+      const key = todoKey(t);
+      if (t.status === 'in_progress' && !started.has(key)) started.set(key, v);
+      if (t.status === 'completed') started.delete(key);
+    }
+  });
+  for (const d of dropped) {
+    const work = main.filter((s) => s.index > d.from.index && s.index < d.to.index && s.name !== 'TodoWrite');
+    if (!work.length) continue;
+    out.push(
+      finding(tl, {
+        category: 'H36',
+        title: `Dropped "${d.item.slice(0, 60)}" after ${plural(work.length, 'step')} on it`,
+        steps: [d.from.index, ...work.map((s) => s.index), d.to.index],
+        wasted: work.map((s) => s.index),
+        confidence: 'low',
+      }),
+    );
+  }
+
+  // H38
+  let run: ToolStep[] = [];
+  const flush = () => {
+    if (run.length >= 4)
+      out.push(
+        finding(tl, {
+          category: 'H38',
+          title: `Rewrote the todo list ${times(run.length - 1)} in a row without completing anything`,
+          steps: run.map((s) => s.index),
+          wasted: run.slice(1).map((s) => s.index),
+          confidence: 'medium',
+        }),
+      );
+    run = [];
+  };
+  const doneCount = (v: (typeof versions)[number]) => v.input.todos.filter((t) => t.status === 'completed').length;
+  const itemsOf = (v: (typeof versions)[number]) => v.input.todos.map(todoKey).sort().join('\n');
+  versions.forEach((v, i) => {
+    const prev = versions[i - 1];
+    if (prev && doneCount(v) <= doneCount(prev) && itemsOf(v) !== itemsOf(prev)) run.push(...(run.length ? [v] : [prev, v]));
+    else flush();
+  });
+  flush();
+
+  // H37: edits while the plan had items left and none in progress.
+  const idle: ToolStep[] = [];
+  let current: Todo[] | null = null;
+  for (const s of main) {
+    if (s.name === 'TodoWrite' && Array.isArray(s.input.todos)) current = s.input.todos as Todo[];
+    else if (current && EDIT_TOOLS.has(s.name) && ok(s) && current.some((t) => t.status === 'pending') && !current.some((t) => t.status === 'in_progress'))
+      idle.push(s);
+  }
+  if (idle.length)
+    out.push(
+      finding(tl, {
+        category: 'H37',
+        title: `${plural(idle.length, 'edit')} made while no plan item was in progress`,
+        steps: idle.map((s) => s.index),
+        wasted: [],
+        confidence: 'low',
+        costs: [],
+      }),
+    );
+
+  // A plan approved in plan mode: files it named but never touched, and files edited it never named.
+  const approved = main.find((s) => s.name === 'ExitPlanMode' && ok(s) && typeof s.input.plan === 'string');
+  if (approved) {
+    const named = new Set([...String(approved.input.plan).matchAll(/[\w@.+-]+(?:\/[\w@.+-]+)*\.[A-Za-z0-9]{1,8}\b/g)].map((m) => basename(m[0])));
+    // Claude carries out an approved plan in the same turn; later turns are new asks.
+    const edited = main.filter((s) => s.index > approved.index && s.turn === approved.turn && EDIT_TOOLS.has(s.name) && ok(s) && filePath(s));
+    const editedNames = new Set(edited.map((s) => basename(filePath(s)!)));
+    const untouched = [...named].filter((n) => /\.(ts|tsx|js|jsx|mjs|py|go|rs|java|rb|swift|kt|c|cc|cpp|h|css|sql|toml|json|ya?ml)$/.test(n) && !editedNames.has(n));
+    const unplanned = edited.filter((s) => !named.has(basename(filePath(s)!)));
+    if (named.size >= 2 && untouched.length)
+      out.push(
+        finding(tl, {
+          category: 'H36',
+          title: `The approved plan named ${plural(untouched.length, 'file')} that ${untouched.length === 1 ? 'was' : 'were'} never changed (${untouched.slice(0, 4).join(', ')})`,
+          steps: [approved.index],
+          wasted: [],
+          confidence: 'low',
+          costs: [],
+        }),
+      );
+    if (named.size >= 2 && unplanned.length)
+      out.push(
+        finding(tl, {
+          category: 'H37',
+          title: `Edited ${plural(new Set(unplanned.map((s) => filePath(s))).size, 'file')} the approved plan didn't name (${[...new Set(unplanned.map((s) => basename(filePath(s)!)))].slice(0, 4).join(', ')})`,
+          steps: [approved.index, ...unplanned.map((s) => s.index)],
+          wasted: [],
+          confidence: 'low',
+          costs: [],
+        }),
+      );
+  }
+  return out;
+}
+
+// ---------- turns worth a closer look ----------
+
+export interface TurnHint {
+  turn: number;
+  prompt: string;
+  lookups: number;
+  edits: number;
+  checks: number;
+  tokens: number;
+  /** Share of the session's weighted cost. */
+  share: number;
+}
+
+/**
+ * Turns that went mostly to looking around: many reads and searches for few edits, or a large share
+ * of the session's cost. Not waste by themselves; the review reads these closely.
+ */
+export function turnHints(tl: Timeline): TurnHint[] {
+  const total = tl.calls.reduce((s, c) => s + weighted(c.usage), 0) || 1;
+  return tl.messages
+    .map((m) => {
+      const steps = tl.steps.filter((s) => s.turn === m.turn);
+      const calls = tl.calls.filter((c) => c.turn === m.turn);
+      return {
+        turn: m.turn,
+        prompt: m.text.slice(0, 100),
+        lookups: steps.filter(isLookup).length,
+        edits: steps.filter((s) => EDIT_TOOLS.has(s.name)).length,
+        checks: steps.filter((s) => command(s) !== null && CHECK.test(command(s)!)).length,
+        tokens: calls.reduce((s, c) => s + c.prompt + c.usage.output, 0),
+        share: calls.reduce((s, c) => s + weighted(c.usage), 0) / total,
+      };
+    })
+    .filter((h) => (h.lookups >= 15 && h.lookups >= 8 * Math.max(1, h.edits)) || h.share >= 0.25)
+    .sort((a, b) => b.share - a.share);
+}
+
 // ---------- the audit ----------
 
-export const DETECTORS = [rereads, repeats, webRepeats, knownPathSearches, envProbes, wrongPackageManager, failures, reverts, bloat, serialReads, piecemealEdits, duplicateSubagents, nearlyFull];
+export const DETECTORS = [
+  rereads, repeats, webRepeats, knownPathSearches, envProbes, wrongPackageManager, failures, reverts, bloat,
+  serialReads, piecemealEdits, duplicateSubagents, nearlyFull, deadEnds, thrownAway, planChurn,
+];
 
 export function detect(tl: Timeline): AuditReport {
   const findings = DETECTORS.flatMap((d) => d(tl)).sort((a, b) => b.weighted - a.weighted);
@@ -828,6 +1161,7 @@ export function detect(tl: Timeline): AuditReport {
     wasted: totals(sure),
     toReview: totals(findings.filter((f) => f.confidence === 'low'), sureKeys),
     findings,
+    hints: turnHints(tl),
   };
 }
 

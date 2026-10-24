@@ -68,11 +68,19 @@ export interface UserMessage {
   text: string;
 }
 
+/** What Claude wrote to the user (not its thinking): evidence of what it used. */
+export interface AssistantText {
+  agent: string | null;
+  call: number;
+  text: string;
+}
+
 export interface Timeline {
   sessionId: string;
   calls: ModelCall[];
   steps: ToolStep[];
   messages: UserMessage[];
+  texts: AssistantText[];
   /** Index of the first main-conversation call after each /compact. */
   compactions: number[];
   /** Subagents and the tool call that started each. */
@@ -125,6 +133,7 @@ class TimelineBuilder {
   private calls: ModelCall[] = [];
   private steps: ToolStep[] = [];
   private messages: UserMessage[] = [];
+  private texts: AssistantText[] = [];
   private compactions: number[] = [];
   private costUsd: number | null = null;
   private byToolUseId = new Map<string, ToolStep>();
@@ -191,6 +200,7 @@ class TimelineBuilder {
     }
     if (!Array.isArray(msg.content)) return;
     msg.content.forEach((block: any, i: number) => {
+      if (block?.type === 'text' && typeof block.text === 'string' && block.text.trim()) this.texts.push({ agent: t.agent, call: call!.index, text: block.text });
       if (block?.type !== 'tool_use') return;
       const local = msg.content.length > 1 ? `${rec.uuid}:${i}` : String(rec.uuid);
       const step: ToolStep = {
@@ -275,7 +285,7 @@ class TimelineBuilder {
         r.sent = sent;
       }
     }
-    return { sessionId: this.sessionId, calls: this.calls, steps: this.steps, messages: this.messages, compactions: this.compactions, agents: this.agents, costUsd: this.costUsd };
+    return { sessionId: this.sessionId, calls: this.calls, steps: this.steps, messages: this.messages, texts: this.texts, compactions: this.compactions, agents: this.agents, costUsd: this.costUsd };
   }
 }
 

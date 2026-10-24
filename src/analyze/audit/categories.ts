@@ -87,6 +87,11 @@ const GROUPS: [string, string, string[]][] = [
     'Scratch files created and never used or left behind',
     'Formatting-only churn mixed into real edits',
   ]],
+  // Added after the first runs on real sessions; new kinds go at the end so ids stay stable.
+  ['M', 'Dead ends', [
+    'Explored something whose results were never used',
+    'Rewrote or threw away work it had just done',
+  ]],
 ];
 
 // Numbered across groups, as in the issue: A1-A9, B10-B16, C17-C19, ...
