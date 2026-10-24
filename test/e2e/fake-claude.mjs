@@ -3,6 +3,7 @@
 //   fake --bg [--resume <id>] [prompt]   start a session daemon, print "backgrounded · <job>"
 //   fake attach <job>                    connect this terminal; every attached terminal shares it
 //   fake stop <job>                      end the session
+//   fake -p --json-schema <schema> …     one structured answer (only the audit review's, for now)
 // The daemon registers in <claude dir>/sessions/<pid>.json (kind "bg"), appends to the transcript,
 // and shows a numbered permission menu for prompts containing "needs-approval".
 import { spawn } from 'node:child_process';
@@ -25,9 +26,33 @@ else if (cmd === 'plugin') {
 else if (cmd === 'attach') attach(rest[0]);
 else if (cmd === 'stop') stop(rest[0]);
 else if (cmd === '__daemon') runDaemon(rest);
+else if (cmd === '-p') print(rest, readFileSync(0, 'utf8'));
 else {
   console.error(`fake claude: unsupported arguments: ${process.argv.slice(2).join(' ')}`);
   process.exit(2);
+}
+
+// `claude -p` with a JSON schema: answers an audit review by flagging the first step it was shown.
+function print(args, prompt) {
+  const schema = JSON.parse(args[args.indexOf('--json-schema') + 1] ?? '{}');
+  const step = Number(/^#(\d+) /m.exec(prompt)?.[1] ?? 1);
+  let out;
+  if (schema.properties?.candidates) {
+    out = {
+      candidates: [],
+      new_findings: [
+        { category: 'B11', title: 'Looked up the webhook handler it had already read', wasted_steps: [step], related_steps: [], confidence: 'high', cause: 'the model ignored context it had', fix: 'Pin src/webhook.ts' },
+      ],
+      lean_calls: 1,
+      notes: '',
+    };
+  } else if (schema.properties?.top_fixes) {
+    out = { summary: 'One avoidable lookup.', top_fixes: [{ fix: 'Pin src/webhook.ts', findings: ['N1'] }] };
+  } else {
+    console.error('fake claude: -p only answers audit reviews');
+    process.exit(2);
+  }
+  console.log(JSON.stringify({ type: 'result', is_error: false, result: '', structured_output: out, total_cost_usd: 0 }));
 }
 
 // `claude mcp add|get|remove`, enough for the user-scope registration.

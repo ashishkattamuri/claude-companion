@@ -24,6 +24,8 @@ interface Props {
   onHide: (ids: string[], hidden: boolean) => void;
   /** Resolves true once the chats are gone (false if cancelled or refused). */
   onDelete: (ids: string[]) => Promise<boolean>;
+  /** Opens the chat on its Audit tab and starts an audit. */
+  onAudit: (id: string) => void;
 }
 
 type Row = { s: SessionListItem; depth: number };
@@ -31,7 +33,7 @@ type Menu = { ids: string[]; x: number; y: number };
 
 const FOLDER_KEY = 'sidebar.folder';
 
-export function Sidebar({ page, sessions: all, selectedId, search, onSearch, onPage, onSelect, onNew, onHide, onDelete }: Props) {
+export function Sidebar({ page, sessions: all, selectedId, search, onSearch, onPage, onSelect, onNew, onHide, onDelete, onAudit }: Props) {
   const [showHidden, setShowHidden] = useState(false);
   /** Only this folder's chats; empty for all folders. Kept across restarts. */
   const [folder, setFolder] = useState(() => localStorage.getItem(FOLDER_KEY) ?? '');
@@ -193,9 +195,20 @@ export function Sidebar({ page, sessions: all, selectedId, search, onSearch, onP
         <div
           className="row-menu"
           role="menu"
-          style={{ left: Math.min(menu.x, window.innerWidth - 170), top: Math.min(menu.y, window.innerHeight - 90) }}
+          style={{ left: Math.min(menu.x, window.innerWidth - 170), top: Math.min(menu.y, window.innerHeight - 125) }}
           onMouseDown={(e) => e.stopPropagation()}
         >
+          {menu.ids.length === 1 && (
+            <button
+              role="menuitem"
+              onClick={() => {
+                setMenu(null);
+                onAudit(menu.ids[0]!);
+              }}
+            >
+              Audit…
+            </button>
+          )}
           <button
             role="menuitem"
             onClick={() => {
@@ -271,6 +284,15 @@ function Group({
               {s.status === 'waiting' && <span className="needs-label">needs you</span>}
               {s.transcriptGone && <span className="where">archived</span>}
               {s.hidden && <span className="where">hidden</span>}
+              {s.auditing ? (
+                <span className="where">auditing…</span>
+              ) : (
+                s.audit && (
+                  <span className={`where ${s.audit.share >= 0.15 ? 'waste-high' : ''}`} title="Share of this chat's cost its audit found wasted">
+                    {Math.round(s.audit.share * 100)}% waste
+                  </span>
+                )
+              )}
             </span>
           </button>
           <button

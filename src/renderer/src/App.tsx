@@ -3,12 +3,12 @@ import type { NewSessionRequest, RecapView, SessionListItem } from '../../shared
 import { api } from './api';
 import { ConnectorsPage, type ConnectorsTab } from './ConnectorsPage';
 import { NewSessionSheet } from './NewSessionSheet';
-import { SessionWorkspace } from './SessionWorkspace';
+import { SessionWorkspace, type View } from './SessionWorkspace';
 import { Sidebar, type Page } from './Sidebar';
 import { sessions as store } from './store';
 import { TodayView } from './TodayView';
 
-type Selection = { kind: 'page'; page: Page } | { kind: 'session'; id: string; draft?: string };
+type Selection = { kind: 'page'; page: Page } | { kind: 'session'; id: string; draft?: string; view?: View };
 
 const SOON: Record<Exclude<Page, 'today' | 'connectors'>, { title: string; text: string }> = {
   ideas: { title: 'Ideas', text: 'Follow-ups and directions from your conversations, ready to run in one click.' },
@@ -106,13 +106,21 @@ export function App() {
           reload();
           return r.ok && r.value;
         }}
+        onAudit={(id) => {
+          setSelection({ kind: 'session', id, view: 'audit' });
+          void api.runAudit(id).then((r) => {
+            if (!r.ok) setToast(r.error);
+            reload();
+          });
+        }}
       />
       <main className="content">
         {selection.kind === 'session' && (
           <SessionWorkspace
-            key={selection.id}
+            key={`${selection.id}:${selection.view ?? ''}`}
             sessionId={selection.id}
             draft={selection.draft}
+            initialView={selection.view}
             onError={setToast}
             onNavigate={(id) => setSelection({ kind: 'session', id })}
           />

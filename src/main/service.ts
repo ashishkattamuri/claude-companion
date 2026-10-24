@@ -2,6 +2,10 @@ import { execFile, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import type { ConversationItem } from '../adapter/conversation.js';
+import { detect } from '../analyze/audit/detectors.js';
+import { chunkTurns, review, reviewModel } from '../analyze/audit/review.js';
+import { loadTimeline } from '../analyze/audit/timeline.js';
+import { buildAuditView, type AuditView } from '../analyze/audit/view.js';
 import type { LlmClient } from '../analyze/llm.js';
 import { notesBehind, notesPath, readNotes, recentExchanges, updateNotes } from '../analyze/notes.js';
 import { getRecap, recapDay, removeGoneSessionsFromRecaps, removeSessionsFromRecaps } from '../analyze/recap.js';
@@ -32,6 +36,7 @@ import type { DB } from '../store/db.js';
 import { getSession, listProjects, listSessions, type SessionRow } from '../store/queries.js';
 import type { SocketRequest, SocketResponse } from '../mcp/protocol.js';
 import type {
+  AuditState,
   NewSessionRequest,
   RecapView,
   Result,
@@ -44,11 +49,14 @@ import { findBackground, startBackground, stopBackground } from './background.js
 import { branchContext } from './branch.js';
 import { SessionChannel, type ChannelDeps, type ChannelInfo } from './session.js';
 import { openInTerminalApp } from './terminal-app.js';
+import { findTranscript } from './transcript.js';
 
 export interface ServiceDeps {
   db: DB;
   cfg: Config;
   llm: LlmClient;
+  /** For audit reviews, which read a whole session and can take minutes; defaults to `llm`. */
+  auditLlm?: LlmClient;
   loadLive: () => LiveSession[];
   env: () => Record<string, string>;
   claudeBin?: string;
@@ -93,6 +101,8 @@ export class CompanionService {
   private toolsEverywhere: boolean | null = null;
   private checkingTools = false;
   private plugins: PluginCli;
+  /** Audits in progress, by session. */
+  private auditing = new Map<string, Promise<Result<AuditView>>>();
 
   constructor(private d: ServiceDeps) {
     this.plugins = new PluginCli(d.claudeBin ?? process.env.COMPANION_CLAUDE_BIN ?? 'claude', d.env);
@@ -147,9 +157,16 @@ export class CompanionService {
       ),
     );
     const hidden = this.idSet(`SELECT session_id AS id FROM hidden_sessions`);
+    const audits = new Map(
+      (this.d.db.prepare(`SELECT session_id AS id, waste_share AS share, model FROM session_audits`).all() as { id: string; share: number; model: string | null }[]).map(
+        (r) => [r.id, { share: r.share, reviewed: r.model !== null }],
+      ),
+    );
     for (const s of items) {
       s.parentId = parents.get(s.id) ?? null;
       s.hidden = hidden.has(s.id);
+      s.audit = audits.get(s.id) ?? null;
+      s.auditing = this.auditing.has(s.id);
     }
     const rank = (s: SessionListItem) => (s.status === 'waiting' ? 3 : s.attached ? 2 : s.live ? 1 : 0);
     return items.filter((s) => !superseded.has(s.id) || s.live).sort((a, b) => rank(b) - rank(a) || (b.lastTs ?? '').localeCompare(a.lastTs ?? ''));
@@ -158,7 +175,7 @@ export class CompanionService {
   private listItem(row: SessionRow, live: LiveSession | null): SessionListItem {
     const ch = this.channels.get(row.id);
     const status = ch?.alive ? ch.state.status : live ? (live.status === 'busy' ? 'busy' : live.status === 'waiting' ? 'waiting' : 'idle') : null;
-    return { ...row, live, background: live?.kind === 'bg', attached: !!ch?.attached, status, parentId: null, hidden: false };
+    return { ...row, live, background: live?.kind === 'bg', attached: !!ch?.attached, status, parentId: null, hidden: false, audit: null, auditing: false };
   }
 
   private idSet(sql: string, ...params: unknown[]): Set<string> {
@@ -252,6 +269,7 @@ export class CompanionService {
         this.d.db.prepare(`DELETE FROM session_links WHERE child_id = ? OR parent_id = ?`).run(id, id);
         this.d.db.prepare(`DELETE FROM session_pins WHERE session_id = ?`).run(id);
         this.d.db.prepare(`DELETE FROM hidden_sessions WHERE session_id = ?`).run(id);
+        this.d.db.prepare(`DELETE FROM session_audits WHERE session_id = ?`).run(id);
       }
       // Its action items and summaries go from the recaps too.
       removeSessionsFromRecaps(this.d.db, ids);
@@ -270,6 +288,90 @@ export class CompanionService {
       out.push(row.id);
       id = row.id;
     }
+  }
+
+  // ── Audits ───────────────────────────────────────────────────────────────────────────────────
+
+  private transcriptOf(sessionId: string): string | null {
+    const row = this.d.db.prepare(`SELECT source_path AS path FROM sessions WHERE id = ?`).get(sessionId) as { path: string | null } | undefined;
+    if (row?.path && existsSync(row.path)) return row.path;
+    return findTranscript(this.d.cfg.projectsDir, sessionId);
+  }
+
+  /** Tool calls in the main conversation, as ingested: how far an audit got, and how far the session is now. */
+  private toolCalls(sessionId: string): number {
+    return (
+      this.d.db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE session_id = ? AND kind = 'tool_use' AND is_sidechain = 0`).get(sessionId) as { n: number }
+    ).n;
+  }
+
+  /** What an audit would read and who reviews it, for the confirmation. */
+  auditEstimate(sessionId: string): Result<{ calls: number; steps: number; tokens: number; parts: number; model: string }> {
+    const path = this.transcriptOf(sessionId);
+    if (!path) return { ok: false, error: 'This chat has no transcript to audit.' };
+    const tl = loadTimeline(path);
+    if (!tl.calls.length) return { ok: false, error: 'This chat has nothing to audit yet.' };
+    return {
+      ok: true,
+      value: {
+        calls: tl.calls.length,
+        steps: tl.steps.length,
+        tokens: tl.calls.reduce((s, c) => s + c.prompt + c.usage.output, 0),
+        parts: chunkTurns(tl).length,
+        model: reviewModel(tl, this.d.cfg.models.audit),
+      },
+    };
+  }
+
+  getAudit(sessionId: string): AuditState {
+    const row = this.d.db.prepare(`SELECT covers_steps AS covers, view_json AS json FROM session_audits WHERE session_id = ?`).get(sessionId) as
+      | { covers: number; json: string }
+      | undefined;
+    return {
+      audit: row ? (JSON.parse(row.json) as AuditView) : null,
+      running: this.auditing.has(sessionId),
+      newSteps: row ? Math.max(0, this.toolCalls(sessionId) - row.covers) : 0,
+    };
+  }
+
+  /**
+   * Audits a session for wasted steps: the detectors, then a review by a second model. If the review
+   * can't run (e.g. a usage limit), the detectors' findings are kept and the reason is shown.
+   */
+  runAudit(sessionId: string): Promise<Result<AuditView>> {
+    const running = this.auditing.get(sessionId);
+    if (running) return running;
+    const run = (async (): Promise<Result<AuditView>> => {
+      const path = this.transcriptOf(sessionId);
+      if (!path) return { ok: false, error: 'This chat has no transcript to audit.' };
+      this.refresh();
+      const covers = this.toolCalls(sessionId);
+      const tl = loadTimeline(path);
+      const report = detect(tl);
+      const model = reviewModel(tl, this.d.cfg.models.audit);
+      let rv = null;
+      let reviewError: string | null = null;
+      try {
+        rv = await review(tl, report, this.d.auditLlm ?? this.d.llm, { model, transcriptPath: path, claudeDir: this.d.cfg.claudeDir });
+      } catch (err) {
+        reviewError = (err as Error).message;
+      }
+      const view = buildAuditView(tl, report, rv, { createdAt: new Date().toISOString(), reviewError });
+      this.d.db
+        .prepare(
+          `INSERT OR REPLACE INTO session_audits(session_id, covers_steps, model, waste_share, view_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(sessionId, covers, view.model, view.wasted.share, JSON.stringify(view), view.createdAt);
+      return { ok: true, value: view };
+    })()
+      .catch((err): Result<AuditView> => ({ ok: false, error: `The audit failed: ${(err as Error).message}` }))
+      .finally(() => {
+        this.auditing.delete(sessionId);
+        this.d.onChanged?.();
+      });
+    this.auditing.set(sessionId, run);
+    this.d.onChanged?.();
+    return run;
   }
 
   listProjects() {

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api } from './api';
+import { AuditPanel, useAudit, wasteLabel } from './AuditPanel';
 import { Composer, shortModel } from './Composer';
 import { Conversation } from './Conversation';
 import { DetailsRail, useExtras } from './DetailsRail';
@@ -7,7 +8,7 @@ import { shortPath } from './format';
 import { useSession } from './store';
 import { TerminalView } from './TerminalView';
 
-type View = 'conversation' | 'split' | 'terminal';
+export type View = 'conversation' | 'split' | 'terminal' | 'audit';
 
 const STATUS: Record<string, { label: string; tone: string }> = {
   waiting: { label: 'Needs you', tone: 'amber' },
@@ -21,22 +22,31 @@ const STATUS: Record<string, { label: string; tone: string }> = {
 export function SessionWorkspace({
   sessionId,
   draft,
+  initialView,
   onError,
   onNavigate,
 }: {
   sessionId: string;
   draft?: string;
+  initialView?: View;
   onError: (m: string) => void;
   onNavigate: (sessionId: string) => void;
 }) {
   const view = useSession(sessionId);
   const extras = useExtras(sessionId);
-  const [mode, setMode] = useState<View>('conversation');
+  const audit = useAudit(sessionId);
+  const [mode, setMode] = useState<View>(initialView ?? 'conversation');
+  const [focus, setFocus] = useState<{ id: string; at: number } | null>(null);
   const [rail, setRail] = useState(true);
   if (!view) return <div className="loading">Loading session…</div>;
   const { state, items } = view;
   const status = state.mode === 'mirror' ? { label: 'View only · plain terminal', tone: 'muted' } : STATUS[state.status]!;
   const running = state.mode === 'attached' || state.mode === 'background';
+  const runAudit = () =>
+    void api.runAudit(sessionId).then((r) => {
+      if (!r.ok) onError(r.error);
+      audit.reload();
+    });
 
   return (
     <div className={`workspace ${rail ? '' : 'no-rail'}`}>
@@ -46,6 +56,15 @@ export function SessionWorkspace({
             <div className="head-title">
               <h1>{state.title}</h1>
               <span className={`status-pill ${status.tone}`}>● {status.label}</span>
+              {audit.state?.audit && (
+                <button
+                  className={`status-pill audit-pill ${audit.state.audit.wasted.share >= 0.15 ? '' : 'calm'}`}
+                  onClick={() => setMode('audit')}
+                  title="Open the audit"
+                >
+                  {wasteLabel(audit.state.audit.wasted)}
+                </button>
+              )}
             </div>
             <div className="crumbs">
               <span className="mono">{shortPath(state.cwd)}</span>
@@ -65,7 +84,7 @@ export function SessionWorkspace({
           </div>
           <div className="head-actions">
             <div className="seg" role="group" aria-label="View">
-              {(['conversation', 'split', 'terminal'] as View[]).map((v) => (
+              {(['conversation', 'split', 'terminal', 'audit'] as View[]).map((v) => (
                 <button key={v} aria-pressed={mode === v} onClick={() => setMode(v)}>
                   {v[0]!.toUpperCase() + v.slice(1)}
                 </button>
@@ -91,10 +110,27 @@ export function SessionWorkspace({
           </div>
         </header>
 
-        <div className={`panes ${mode}`}>
-          {mode !== 'terminal' && (
+        {mode === 'audit' && (
+          <AuditPanel
+            state={audit.state}
+            onRun={runAudit}
+            onJump={(id) => {
+              setMode('conversation');
+              setFocus({ id, at: Date.now() });
+            }}
+          />
+        )}
+        <div className={`panes ${mode}`} hidden={mode === 'audit'}>
+          {mode !== 'terminal' && mode !== 'audit' && (
             <div className="convo-pane">
-              <Conversation items={items} state={state} sentFromApp={view.sentFromApp} onAnswer={(key) => api.answer(sessionId, key)} onShowTerminal={() => setMode('split')} />
+              <Conversation
+                items={items}
+                state={state}
+                sentFromApp={view.sentFromApp}
+                focus={focus}
+                onAnswer={(key) => api.answer(sessionId, key)}
+                onShowTerminal={() => setMode('split')}
+              />
               <Composer
                 state={state}
                 draft={draft}
@@ -107,7 +143,7 @@ export function SessionWorkspace({
               />
             </div>
           )}
-          {mode !== 'conversation' && (
+          {(mode === 'split' || mode === 'terminal') && (
             <TerminalView sessionId={sessionId} interactive={state.mode === 'attached'} visible />
           )}
         </div>

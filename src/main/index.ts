@@ -31,6 +31,7 @@ app.whenReady().then(() => {
     db,
     cfg,
     llm: new ClaudeCliClient(db, join(dirname(cfg.dbPath), 'run')),
+    auditLlm: new ClaudeCliClient(db, join(dirname(cfg.dbPath), 'run'), 600_000),
     loadLive: () => readLiveSessions(cfg.claudeDir).filter((l) => !cfg.isOptedOut(l.cwd)),
     env: () => sessionEnv(shellPath),
     analysis: !process.env.COMPANION_NO_ANALYSIS,
@@ -89,6 +90,26 @@ app.whenReady().then(() => {
     if (r.response !== 0) return { ok: true, value: false };
     const done = await service.deleteSessions(ids);
     return done.ok ? { ok: true, value: true } : done;
+  });
+  ipcMain.handle('audit:get', (_e, id: string) => service.getAudit(id));
+  ipcMain.handle('audit:run', async (_e, id: string) => {
+    const est = service.auditEstimate(id);
+    if (!est.ok) return est;
+    const { calls, steps, tokens, parts, model } = est.value;
+    const title = service.listSessions({}).find((s) => s.id === id)?.title ?? 'this chat';
+    const r = await dialog.showMessageBox(win!, {
+      type: 'question',
+      message: `Audit "${title}" for wasted steps?`,
+      detail:
+        `${calls} model calls, ${steps} tool calls, ${tokenCount(tokens)} tokens sent. ` +
+        `${model[0]!.toUpperCase()}${model.slice(1)} reviews it in ${parts === 1 ? 'one part' : `${parts} parts`} ` +
+        `(about ${parts + 1} calls on your Claude login), usually a minute or two.`,
+      buttons: ['Run audit', 'Cancel'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (r.response !== 0) return { ok: true, value: null };
+    return service.runAudit(id);
   });
   ipcMain.handle('plugins:list', () => service.listPlugins());
   ipcMain.handle('plugins:action', async (_e, action: PluginAction, id: string) => {
@@ -253,3 +274,5 @@ function createWindow(): BrowserWindow {
   else void w.loadFile(join(__dirname, '../renderer/index.html'));
   return w;
 }
+
+const tokenCount = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));

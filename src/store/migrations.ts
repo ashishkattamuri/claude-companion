@@ -180,4 +180,15 @@ export const MIGRATIONS: string[] = [
   -- When deleted chats were taken out of a recap (its prose may still mention them).
   ALTER TABLE recaps ADD COLUMN pruned_at TEXT;
   `,
+  `
+  -- The latest audit of a session: wasted steps, their causes and fixes, as the window shows them.
+  CREATE TABLE session_audits (
+    session_id   TEXT PRIMARY KEY,
+    covers_steps INTEGER NOT NULL,   -- tool calls in the main conversation when it ran
+    model        TEXT,               -- the reviewing model; null when only the detectors ran
+    waste_share  REAL NOT NULL,      -- share of the session's cost flagged as waste, for the sidebar
+    view_json    TEXT NOT NULL,
+    created_at   TEXT NOT NULL
+  );
+  `,
 ];

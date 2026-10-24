@@ -13,12 +13,16 @@ interface Props {
   onAnswer: (key: string) => void;
   /** Shows the terminal next to the conversation. */
   onShowTerminal: () => void;
+  /** A step to scroll to and highlight (e.g. from the audit); `at` makes the same step focusable again. */
+  focus?: { id: string; at: number } | null;
 }
 
-export function Conversation({ items, state, sentFromApp, onAnswer, onShowTerminal }: Props) {
+export function Conversation({ items, state, sentFromApp, onAnswer, onShowTerminal, focus }: Props) {
   const turns = toTurns(items);
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
+  // Showing a step leaves the scroll where the step is, instead of following new output.
+  if (focus) pinned.current = false;
   const live = state.status === 'busy' || state.status === 'waiting' || state.status === 'starting';
 
   // Follow new output while you're at the bottom; leave the scroll alone if you've scrolled up to read.
@@ -51,6 +55,7 @@ export function Conversation({ items, state, sentFromApp, onAnswer, onShowTermin
             live={live}
             waiting={state.status === 'waiting'}
             fromApp={t.user ? sentFromApp.has(t.user.id) : false}
+            focus={focus && t.steps.some((s) => s.id === focus.id) ? focus : null}
           />
         ))}
         {state.queued.map((q, i) => (
@@ -89,6 +94,7 @@ const TurnView = memo(function TurnView({
   live,
   waiting,
   fromApp,
+  focus,
 }: {
   turn: Turn;
   cwd: string | null;
@@ -96,6 +102,7 @@ const TurnView = memo(function TurnView({
   live: boolean;
   waiting: boolean;
   fromApp: boolean;
+  focus: { id: string; at: number } | null;
 }) {
   return (
     <>
@@ -108,7 +115,7 @@ const TurnView = memo(function TurnView({
           </span>
         </div>
       )}
-      {turn.steps.length > 0 && <Steps steps={turn.steps} cwd={cwd} openByDefault={last && live} waiting={last && waiting} />}
+      {turn.steps.length > 0 && <Steps steps={turn.steps} cwd={cwd} openByDefault={last && live} waiting={last && waiting} focus={focus} />}
       {turn.answer.map((item) => (
         <AnswerItem key={item.id} item={item} cwd={cwd} />
       ))}
@@ -116,11 +123,26 @@ const TurnView = memo(function TurnView({
   );
 });
 
-function Steps({ steps, cwd, openByDefault, waiting }: { steps: ConversationItem[]; cwd: string | null; openByDefault: boolean; waiting: boolean }) {
+function Steps({
+  steps,
+  cwd,
+  openByDefault,
+  waiting,
+  focus,
+}: {
+  steps: ConversationItem[];
+  cwd: string | null;
+  openByDefault: boolean;
+  waiting: boolean;
+  focus: { id: string; at: number } | null;
+}) {
   const [open, setOpen] = useState(openByDefault);
   useEffect(() => {
     if (openByDefault) setOpen(true);
   }, [openByDefault]);
+  useEffect(() => {
+    if (focus) setOpen(true);
+  }, [focus]);
   const tools = steps.filter((s): s is Tool => s.kind === 'tool');
   let added = 0;
   let removed = 0;
@@ -144,7 +166,7 @@ function Steps({ steps, cwd, openByDefault, waiting }: { steps: ConversationItem
       {open && (
         <div className="step-list">
           {steps.map((s, i) => (
-            <StepItem key={s.id} item={s} cwd={cwd} waiting={waiting && i === steps.length - 1} />
+            <StepItem key={s.id} item={s} cwd={cwd} waiting={waiting && i === steps.length - 1} focus={focus?.id === s.id ? focus : null} />
           ))}
         </div>
       )}
@@ -152,11 +174,11 @@ function Steps({ steps, cwd, openByDefault, waiting }: { steps: ConversationItem
   );
 }
 
-function StepItem({ item, cwd, waiting }: { item: ConversationItem; cwd: string | null; waiting: boolean }) {
+function StepItem({ item, cwd, waiting, focus }: { item: ConversationItem; cwd: string | null; waiting: boolean; focus: { id: string; at: number } | null }) {
   if (item.kind === 'assistant') return <div className="narr">{item.text}</div>;
   if (item.kind === 'thinking') return <Thinking text={item.text} />;
   if (item.kind === 'notice') return <div className={`notice ${item.tone}`}>{item.text}</div>;
-  if (item.kind === 'tool') return <ToolRow tool={item} cwd={cwd} waiting={waiting} />;
+  if (item.kind === 'tool') return <ToolRow tool={item} cwd={cwd} waiting={waiting} focus={focus} />;
   return null;
 }
 
@@ -172,14 +194,20 @@ function Thinking({ text }: { text: string }) {
   );
 }
 
-function ToolRow({ tool, cwd, waiting }: { tool: Tool; cwd: string | null; waiting: boolean }) {
+function ToolRow({ tool, cwd, waiting, focus }: { tool: Tool; cwd: string | null; waiting: boolean; focus: { id: string; at: number } | null }) {
   const d = describeTool(tool, cwd);
   const isEdit = ['Edit', 'MultiEdit', 'Write'].includes(tool.name);
   const [open, setOpen] = useState(false);
+  const row = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!focus) return;
+    setOpen(true);
+    row.current?.scrollIntoView({ block: 'center' });
+  }, [focus]);
   const failed = tool.result?.isError;
   const icon = !tool.result ? (waiting ? <span className="wait-dot" /> : <span className="spinner small" />) : failed ? <span className="bad">✕</span> : <span className="ok">✓</span>;
   return (
-    <div className="tool">
+    <div className={`tool ${focus ? 'focused' : ''}`} ref={row}>
       <button className="step" onClick={() => setOpen(!open)} aria-expanded={open}>
         <span className="step-icon">{icon}</span>
         <span className="step-main">

@@ -186,3 +186,41 @@ describe('deleting chats', () => {
     expect(existsSync(join(projectDir, `${PARENT}.jsonl`))).toBe(true);
   });
 });
+
+describe('audits', () => {
+  /** Answers the review's calls in order: one part, then the summary. */
+  const reviewer = (): LlmClient => {
+    const outputs: unknown[] = [
+      {
+        candidates: [],
+        new_findings: [{ category: 'B10', title: 'Re-read the webhook handler', wasted_steps: [1], related_steps: [], confidence: 'high', cause: 'a fact missing from CLAUDE.md', fix: 'note the handler path in CLAUDE.md' }],
+        lean_calls: 2,
+        notes: '',
+      },
+      { summary: 'One avoidable read.', top_fixes: [{ fix: 'note the handler path in CLAUDE.md', findings: ['N1'] }] },
+    ];
+    return { complete: async (req) => req.schema.parse(outputs.shift()) };
+  };
+
+  it('stores an audit, shows it in the list, and deletes it with the chat', async () => {
+    const svc = new CompanionService({ db, cfg, llm: {} as LlmClient, auditLlm: reviewer(), loadLive: () => live, env: () => ({}), analysis: false, notes: false });
+    svc.refresh();
+    const r = await svc.runAudit(PARENT);
+    expect(r.ok && r.value.findings.map((f) => [f.id, f.status, f.steps[0]?.label])).toEqual([['N1', 'new', expect.stringMatching(/^Read /)]]);
+    expect(r.ok && r.value.summary).toBe('One avoidable read.');
+    expect(svc.listSessions({}).find((s) => s.id === PARENT)!.audit).toMatchObject({ reviewed: true });
+    expect(svc.getAudit(PARENT)).toMatchObject({ running: false, newSteps: 0, audit: { model: expect.any(String) } });
+
+    await svc.deleteSessions([PARENT]);
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM session_audits`).get()).toEqual({ n: 0 });
+  });
+
+  it('keeps the detectors’ findings when the review cannot run', async () => {
+    const failing: LlmClient = { complete: async () => Promise.reject(new Error('usage limit reached')) };
+    const svc = new CompanionService({ db, cfg, llm: {} as LlmClient, auditLlm: failing, loadLive: () => live, env: () => ({}), analysis: false, notes: false });
+    svc.refresh();
+    const r = await svc.runAudit(PARENT);
+    expect(r.ok && r.value).toMatchObject({ model: null, reviewError: 'usage limit reached' });
+    expect(svc.listSessions({}).find((s) => s.id === PARENT)!.audit).toMatchObject({ reviewed: false });
+  });
+});

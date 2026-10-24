@@ -253,6 +253,19 @@ try {
   await new Promise((r) => setTimeout(r, 5500)); // the next background scan
   check('…and they stay gone after a rescan', (await row('Old experiment').count()) === 0 && (await row('Webhook retry logic').count()) === 1);
 
+  // Auditing a session for wasted steps: from the row's menu, reviewed by the (fake) model.
+  await row('Webhook retry logic').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Audit…' }).click();
+  const audit = page.locator('.audit-view');
+  check('"Audit…" opens the chat on its Audit tab and runs an audit', await until(async () => (await audit.innerText()).includes('Looked up the webhook handler')));
+  check('…showing the summary and the top fix', (await audit.innerText()).includes('One avoidable lookup.') && (await audit.innerText()).includes('Pin src/webhook.ts'));
+  check('the sidebar row shows its waste', await until(async () => (await row('Webhook retry logic').innerText()).includes('waste')));
+  check('…and so does the header', (await page.locator('.audit-pill').count()) === 1);
+  await audit.locator('.finding summary').first().click();
+  await page.screenshot({ path: join(shots, '6b-audit.png') });
+  await audit.locator('.step-ref').first().click();
+  check('a finding\'s step opens in the conversation, highlighted', await until(async () => (await page.locator('.tool.focused').count()) === 1));
+
   // Connectors: Claude Code's /plugin as a page.
   await app.evaluate(({ dialog }) => {
     globalThis.dialogs = [];

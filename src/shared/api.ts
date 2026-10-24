@@ -3,6 +3,7 @@
  * Type-only: the renderer imports nothing from the backend at runtime.
  */
 import type { ConversationItem, PatchHunk, SessionFacts, ToolResult } from '../adapter/conversation.js';
+import type { AuditView } from '../analyze/audit/view.js';
 import type { RecapRow } from '../analyze/recap.js';
 import type { AnalyzerStatus } from '../analyze/runner.js';
 import type { RecapSource, ServerView } from '../connectors/index.js';
@@ -15,6 +16,16 @@ import type { ProjectRow, SessionRow } from '../store/queries.js';
 export type { ConversationItem, PatchHunk, SessionFacts, ToolResult, ProjectRow, RecapRow, AnalyzerStatus, LiveSession };
 export type { ServerView, RecapSource, GitHubActivity, GitHubItem, ServerConfig };
 export type { ActionResult, CatalogPlugin, MarketplaceAction, PluginAction, PluginCatalog, PluginConfig };
+export type { AuditView };
+export type { AuditFindingView, AuditStepRef } from '../analyze/audit/view.js';
+
+/** A session's latest audit, whether one is running, and how far the session has moved on since. */
+export interface AuditState {
+  audit: AuditView | null;
+  running: boolean;
+  /** Tool calls made since the audit ran. */
+  newSteps: number;
+}
 
 /** A dialog Claude Code is showing in the terminal, offered in the UI as well. */
 export type ScreenPrompt =
@@ -75,6 +86,9 @@ export interface SessionListItem extends SessionRow {
   parentId: string | null;
   /** Hidden from the sidebar unless "Show hidden" is on. */
   hidden: boolean;
+  /** The latest audit: the share of the session's cost it found wasted. */
+  audit: { share: number; reviewed: boolean } | null;
+  auditing: boolean;
 }
 
 /** Context tools and links for one session. */
@@ -146,6 +160,12 @@ export interface CompanionApi {
   reloadPins(sessionId: string): Promise<Result>;
   openNotes(sessionId: string): Promise<void>;
   refreshNotes(sessionId: string): Promise<void>;
+  getAudit(sessionId: string): Promise<AuditState>;
+  /**
+   * Asks to confirm (showing what it will read and which model reviews it), then audits the session
+   * for wasted steps. `null` means cancelled. Resolves when the audit is done.
+   */
+  runAudit(sessionId: string): Promise<Result<AuditView | null>>;
   /** Restarts a chat that lacks Companion's tools as a copy that has them (history kept). */
   restartWithTools(sessionId: string): Promise<Result<string>>;
   /** Registers the new-chat tool for every Claude session, including ones in a terminal. */
