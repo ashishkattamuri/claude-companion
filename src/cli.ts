@@ -5,6 +5,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describe as describeStep, detect, k } from './analyze/audit/detectors.js';
+import { loadTimeline } from './analyze/audit/timeline.js';
 import { ClaudeCliClient } from './analyze/llm.js';
 import { recapDay, getRecap } from './analyze/recap.js';
 import { readStatus, runJobs, spawnDetachedRun } from './analyze/runner.js';
@@ -12,6 +14,7 @@ import { CONFIG_PATH, loadConfig } from './config.js';
 import { hookCommand, hookStatus, installHook, settingsPath, uninstallHook } from './hooks/install.js';
 import { readLiveSessions } from './ingest/live.js';
 import { scan } from './ingest/scanner.js';
+import { findTranscript } from './main/transcript.js';
 import { openDb } from './store/db.js';
 
 const program = new Command()
@@ -145,6 +148,37 @@ program
     if (recap.blockers.length) console.log(`\nBlocked:\n${recap.blockers.map((b) => `  - ${b}`).join('\n')}`);
     console.log('');
     for (const p of recap.projects) console.log(`${p.project}: ${p.summary}\n`);
+  });
+
+program
+  .command('audit')
+  .description('Find wasted steps in a session (repeated reads, loops, failed calls, bloated output…)')
+  .argument('<session>', 'a session id, or the path to its transcript')
+  .option('--json', 'print the report as JSON')
+  .option('--steps', 'list the steps of each finding')
+  .action((session: string, opts: { json?: boolean; steps?: boolean }) => {
+    const path = existsSync(session) ? session : findTranscript(loadConfig().projectsDir, session);
+    if (!path) {
+      console.error(`No transcript found for ${session}.`);
+      process.exitCode = 1;
+      return;
+    }
+    const tl = loadTimeline(path);
+    const r = detect(tl);
+    if (opts.json) return console.log(JSON.stringify(r, null, 2));
+    const usd = (n: number | null) => (n === null ? '' : ` · $${n.toFixed(2)}`);
+    console.log(`${r.sessionId}: ${r.calls} model calls, ${tl.steps.length} tool calls, ${k(r.tokens)} tokens sent${usd(r.costUsd)}`);
+    const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
+    console.log(`Wasted: ~${k(r.wasted.tokens)} tokens, ${pct(r.wasted.share)} of the cost${usd(r.wasted.costUsd)}`);
+    console.log(`To review: ~${k(r.toReview.tokens)} tokens more, ${pct(r.toReview.share)}${usd(r.toReview.costUsd)} (low confidence)\n`);
+    if (!r.findings.length) return console.log('Nothing flagged.');
+    for (const f of r.findings) {
+      const share = r.weighted ? f.weighted / r.weighted : 0;
+      const cost = !f.tokens ? '' : r.costUsd !== null ? `$${(r.costUsd * share).toFixed(2)}` : `~${k(f.tokens)} tok`;
+      console.log(`${f.category.padEnd(4)} ${f.confidence.padEnd(6)} ${cost.padStart(8)}  ${f.title}`);
+      if (f.cause) console.log(`${' '.repeat(21)}cause: ${f.cause}`);
+      if (opts.steps) for (const i of f.steps) console.log(`${' '.repeat(21)}#${i + 1} ${describeStep(tl.steps[i]!)}`);
+    }
   });
 
 const hooks = program.command('hooks').description('Manage the optional Claude Code SessionEnd hook');
