@@ -72,7 +72,7 @@ function callCost(c: ModelCall): Cost {
  * The cost of wasted steps: their results, plus any call whose tool calls were all wasted (without
  * them the model would have gone straight to its next action), plus calls named as avoidable.
  */
-function costOf(tl: Timeline, wasted: number[], avoidableCalls: number[] = []): Cost[] {
+export function costOfSteps(tl: Timeline, wasted: number[], avoidableCalls: number[] = []): Cost[] {
   const set = new Set(wasted);
   const calls = new Set(avoidableCalls);
   for (const i of wasted) {
@@ -86,7 +86,7 @@ function finding(
   tl: Timeline,
   f: { category: string; title: string; steps: number[]; wasted: number[]; confidence: Confidence; cause?: string; avoidableCalls?: number[]; costs?: Cost[] },
 ): Finding {
-  const costs = f.costs ?? costOf(tl, f.wasted, f.avoidableCalls);
+  const costs = f.costs ?? costOfSteps(tl, f.wasted, f.avoidableCalls);
   return {
     category: f.category,
     title: f.title,
@@ -1136,20 +1136,6 @@ export function detect(tl: Timeline): AuditReport {
   const findings = DETECTORS.flatMap((d) => d(tl)).sort((a, b) => b.weighted - a.weighted);
   const total = tl.calls.reduce((s, c) => s + c.prompt + c.usage.output, 0);
   const totalWeighted = tl.calls.reduce((s, c) => s + weighted(c.usage), 0);
-  // A step or call flagged by several findings counts once, at its largest cost.
-  const totals = (fs: Finding[], already = new Set<string>()): Totals => {
-    const worst = new Map<string, Cost>();
-    for (const f of fs)
-      for (const c of f.costs) {
-        if (already.has(c.key)) continue;
-        const prev = worst.get(c.key);
-        if (!prev || c.weighted > prev.weighted) worst.set(c.key, c);
-      }
-    const tokens = [...worst.values()].reduce((s, c) => s + c.tokens, 0);
-    const w = [...worst.values()].reduce((s, c) => s + c.weighted, 0);
-    const share = totalWeighted ? Math.min(1, w / totalWeighted) : 0;
-    return { tokens, weighted: w, share, costUsd: tl.costUsd !== null ? tl.costUsd * share : null };
-  };
   const sure = findings.filter((f) => f.confidence !== 'low');
   const sureKeys = new Set(sure.flatMap((f) => f.costs.map((c) => c.key)));
   return {
@@ -1158,11 +1144,27 @@ export function detect(tl: Timeline): AuditReport {
     tokens: total,
     weighted: totalWeighted,
     costUsd: tl.costUsd,
-    wasted: totals(sure),
-    toReview: totals(findings.filter((f) => f.confidence === 'low'), sureKeys),
+    wasted: totalsOf(tl, sure),
+    toReview: totalsOf(tl, findings.filter((f) => f.confidence === 'low'), sureKeys),
     findings,
     hints: turnHints(tl),
   };
+}
+
+/** What a set of findings cost together: a step or call flagged by several counts once, at its largest cost. */
+export function totalsOf(tl: Timeline, fs: Finding[], already = new Set<string>()): Totals {
+  const totalWeighted = tl.calls.reduce((s, c) => s + weighted(c.usage), 0);
+  const worst = new Map<string, Cost>();
+  for (const f of fs)
+    for (const c of f.costs) {
+      if (already.has(c.key)) continue;
+      const prev = worst.get(c.key);
+      if (!prev || c.weighted > prev.weighted) worst.set(c.key, c);
+    }
+  const tokens = [...worst.values()].reduce((s, c) => s + c.tokens, 0);
+  const w = [...worst.values()].reduce((s, c) => s + c.weighted, 0);
+  const share = totalWeighted ? Math.min(1, w / totalWeighted) : 0;
+  return { tokens, weighted: w, share, costUsd: tl.costUsd !== null ? tl.costUsd * share : null };
 }
 
 // ---------- helpers ----------

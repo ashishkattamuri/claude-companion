@@ -5,8 +5,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe as describeStep, detect, k } from './analyze/audit/detectors.js';
-import { loadTimeline } from './analyze/audit/timeline.js';
+import { describe as describeStep, detect, k, type AuditReport } from './analyze/audit/detectors.js';
+import { review, reviewModel, type Review } from './analyze/audit/review.js';
+import { loadTimeline, type Timeline } from './analyze/audit/timeline.js';
 import { ClaudeCliClient } from './analyze/llm.js';
 import { recapDay, getRecap } from './analyze/recap.js';
 import { readStatus, runJobs, spawnDetachedRun } from './analyze/runner.js';
@@ -156,8 +157,11 @@ program
   .argument('<session>', 'a session id, or the path to its transcript')
   .option('--json', 'print the report as JSON')
   .option('--steps', 'list the steps of each finding')
-  .action((session: string, opts: { json?: boolean; steps?: boolean }) => {
-    const path = existsSync(session) ? session : findTranscript(loadConfig().projectsDir, session);
+  .option('--review', 'have a model review the findings and look for waste the detectors miss (uses your Claude login)')
+  .option('--model <model>', 'the reviewing model (default: one tier above the session\'s)')
+  .action(async (session: string, opts: { json?: boolean; steps?: boolean; review?: boolean; model?: string }) => {
+    const cfg = loadConfig();
+    const path = existsSync(session) ? session : findTranscript(cfg.projectsDir, session);
     if (!path) {
       console.error(`No transcript found for ${session}.`);
       process.exitCode = 1;
@@ -165,6 +169,15 @@ program
     }
     const tl = loadTimeline(path);
     const r = detect(tl);
+    if (opts.review) {
+      const model = opts.model ?? reviewModel(tl, cfg.models.audit);
+      const db = openDb(cfg.dbPath);
+      const llm = new ClaudeCliClient(db, join(dirname(cfg.dbPath), 'run'), 600_000);
+      if (!opts.json) console.error(`Reviewing with ${model}…`);
+      const rv = await review(tl, r, llm, { model, transcriptPath: path, claudeDir: cfg.claudeDir });
+      if (opts.json) return console.log(JSON.stringify({ ...r, review: rv }, null, 2));
+      return printReview(tl, r, rv, opts.steps ?? false);
+    }
     if (opts.json) return console.log(JSON.stringify(r, null, 2));
     const usd = (n: number | null) => (n === null ? '' : ` · $${n.toFixed(2)}`);
     console.log(`${r.sessionId}: ${r.calls} model calls, ${tl.steps.length} tool calls, ${k(r.tokens)} tokens sent${usd(r.costUsd)}`);
@@ -188,6 +201,32 @@ program
       if (opts.steps) for (const i of f.steps) console.log(`${' '.repeat(21)}#${i + 1} ${describeStep(tl.steps[i]!)}`);
     }
   });
+
+function printReview(tl: Timeline, r: AuditReport, rv: Review, steps: boolean) {
+  const share = (w: number) => (r.weighted ? w / r.weighted : 0);
+  const cost = (w: number, tokens: number) => (r.costUsd !== null ? `$${(r.costUsd * share(w)).toFixed(2)}` : `~${k(tokens)} tok`);
+  console.log(`${r.sessionId}: ${r.calls} model calls, ${k(r.tokens)} tokens sent${r.costUsd !== null ? ` · $${r.costUsd.toFixed(2)}` : ''}. Reviewed by ${rv.model} (${rv.llmCalls} calls).`);
+  console.log(`Wasted: ${cost(rv.wasted.weighted, rv.wasted.tokens)}, ${(rv.wasted.share * 100).toFixed(1)}% of the cost. Lean path: about ${rv.leanCalls} of ${r.calls} calls.\n`);
+  console.log(`${rv.summary}\n`);
+  if (rv.topFixes.length) {
+    console.log('Top fixes:');
+    rv.topFixes.forEach((t, i) => console.log(`  ${i + 1}. ${t.fix}  (${cost(t.weighted, t.tokens)}; ${t.findings.join(', ')})`));
+    console.log('');
+  }
+  for (const f of rv.findings) {
+    if (f.status === 'rejected') continue;
+    const tag = f.status === 'new' ? 'new' : f.status === 'confirmed' ? 'ok' : '?';
+    console.log(`${f.id.padEnd(4)} ${f.category.padEnd(4)} ${tag.padEnd(3)} ${cost(f.weighted, f.tokens).padStart(9)}  ${f.title}`);
+    if (f.reason) console.log(`${' '.repeat(25)}${f.reason}`);
+    if (f.fix) console.log(`${' '.repeat(25)}fix: ${f.fix}${f.cause ? ` (cause: ${f.cause})` : ''}`);
+    if (steps) for (const i of f.steps) console.log(`${' '.repeat(25)}#${i + 1} ${describeStep(tl.steps[i]!)}`);
+  }
+  const rejected = rv.findings.filter((f) => f.status === 'rejected');
+  if (rejected.length) {
+    console.log(`\nRejected (${rejected.length}):`);
+    for (const f of rejected) console.log(`  ${f.id} ${f.category} ${f.title}\n      ${f.reason}`);
+  }
+}
 
 const hooks = program.command('hooks').description('Manage the optional Claude Code SessionEnd hook');
 

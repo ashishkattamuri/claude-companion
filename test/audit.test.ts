@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { detect } from '../src/analyze/audit/detectors.js';
 import { CATEGORIES } from '../src/analyze/audit/categories.js';
+import { chunkTurns, review, reviewModel } from '../src/analyze/audit/review.js';
 import { timelineFromLines } from '../src/analyze/audit/timeline.js';
+import type { LlmClient, LlmRequest } from '../src/analyze/llm.js';
 
 /**
  * Builds a transcript the way Claude Code writes one: each model call is an assistant record per
@@ -376,5 +378,86 @@ describe('audit detectors', () => {
     const sum = r.findings.reduce((s, f) => s + f.tokens, 0);
     expect(r.wasted.tokens).toBeLessThan(sum);
     expect(r.wasted.share).toBeGreaterThan(0);
+  });
+});
+
+/** Answers each model call with the next canned output, and keeps the requests. */
+class FakeLlm implements LlmClient {
+  requests: LlmRequest<unknown>[] = [];
+  constructor(private outputs: unknown[]) {}
+  async complete<T>(req: LlmRequest<T>): Promise<T> {
+    this.requests.push(req as LlmRequest<unknown>);
+    return req.schema.parse(this.outputs.shift());
+  }
+}
+
+describe('audit review', () => {
+  const session = () =>
+    new Session()
+      .prompt('Fix the retry bug. Tests run with pnpm vitest.')
+      .call(['Grep', { pattern: 'retry', path: 'src' }, 'src/pay.ts:12:retry()'])
+      .call(['Bash', { command: 'git status' }, 'clean'])
+      .call(['Bash', { command: 'git status' }, 'clean'])
+      .call(['Bash', { command: 'which pnpm' }, '/usr/local/bin/pnpm'])
+      .call(['Read', { file_path: '/repo/src/pay.ts' }, 'x'.repeat(3000)])
+      .call(['Edit', { file_path: '/repo/src/pay.ts', old_string: 'retry()', new_string: 'retry(key)' }, 'Updated'])
+      .reply('Fixed.');
+
+  it('merges verdicts, prices new findings from the timeline, and leaves rejected ones out of the total', async () => {
+    const tl = session().timeline();
+    const report = detect(tl);
+    const ids = report.findings.map((f, i) => [f.category, `F${i + 1}`]);
+    const a6 = ids.find(([c]) => c === 'A6')![1]!;
+    const c17 = ids.find(([c]) => c === 'C17')![1]!;
+    const llm = new FakeLlm([
+      {
+        candidates: [
+          { id: a6, verdict: 'confirmed', reason: '#3 repeats #2', cause: 'the model ignored context it had', fix: 'none needed' },
+          { id: c17, verdict: 'rejected', reason: 'cheap check', cause: '', fix: '' },
+        ],
+        new_findings: [
+          { category: 'B10', title: 'Searched for how tests run though the user said', wasted_steps: [4, 99], related_steps: [], confidence: 'high', cause: 'a fact missing from CLAUDE.md', fix: 'add the test command to CLAUDE.md' },
+        ],
+        lean_calls: 4,
+        notes: 'retry fixed',
+      },
+      { summary: 'Mostly lean.', top_fixes: [{ fix: 'add the test command to CLAUDE.md', findings: ['N1'] }] },
+    ]);
+    const rv = await review(tl, report, llm, { model: 'opus' });
+
+    expect(llm.requests[0]!.prompt).toContain('#3 Bash: git status');
+    expect(llm.requests[0]!.prompt).toContain(`${a6} A6`);
+    expect(rv.findings.find((f) => f.id === a6)).toMatchObject({ status: 'confirmed', reason: '#3 repeats #2' });
+    expect(rv.findings.find((f) => f.id === c17)!.status).toBe('rejected');
+    // Step #99 doesn't exist and is dropped; #4 is priced from the timeline.
+    const n1 = rv.findings.find((f) => f.id === 'N1')!;
+    expect(n1).toMatchObject({ status: 'new', steps: [3] });
+    expect(n1.tokens).toBeGreaterThan(0);
+    expect(rv.topFixes[0]).toMatchObject({ fix: 'add the test command to CLAUDE.md', findings: ['N1'] });
+    // Only confirmed and new findings count: the rejected probe's step #4 counts once, through N1.
+    expect(rv.wasted.tokens).toBe(rv.findings.find((f) => f.id === a6)!.tokens + n1.tokens);
+    expect(rv).toMatchObject({ leanCalls: 4, summary: 'Mostly lean.', llmCalls: 2 });
+  });
+
+  it('splits a long session at turns and carries the notes forward', async () => {
+    const s = new Session();
+    for (let t = 0; t < 3; t++) s.prompt(`task ${t}`).call(['Read', { file_path: `/repo/f${t}.ts` }, 'y'.repeat(900)]).reply();
+    const tl = s.timeline();
+    const chunks = chunkTurns(tl, 1200);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks[0]!.text).toContain('## Turn 1');
+    const out = (n: string) => ({ candidates: [], new_findings: [], lean_calls: 1, notes: n });
+    const llm = new FakeLlm(chunks.map((_, i) => out(`after part ${i + 1}`)));
+    const rv = await review(tl, detect(tl), llm, { model: 'opus', chunkChars: 1200 });
+    expect(llm.requests[1]!.prompt).toContain('after part 1');
+    expect(rv).toMatchObject({ leanCalls: chunks.length, summary: 'No waste confirmed.' });
+  });
+
+  it('reviews with a model one tier up unless one is configured', () => {
+    const tl = session().timeline();
+    expect(reviewModel(tl, '')).toBe('opus');
+    expect(reviewModel(tl, 'sonnet')).toBe('sonnet');
+    const haiku = timelineFromLines('s', session().lines.map((l) => l.replace('claude-sonnet-5-5', 'claude-haiku-4-5')));
+    expect(reviewModel(haiku, '')).toBe('sonnet');
   });
 });

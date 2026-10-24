@@ -31,6 +31,8 @@ const ConfigSchema = z.object({
       recap: z.string().default('sonnet'),
       ideas: z.string().default('sonnet'),
       notes: z.string().default('haiku'),
+      // Empty: one tier above the model the audited session used.
+      audit: z.string().default(''),
     })
     .prefault({}),
   limits: z
