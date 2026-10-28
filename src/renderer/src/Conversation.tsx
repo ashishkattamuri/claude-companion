@@ -1,7 +1,8 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { ConversationItem, ScreenPrompt, SessionState } from '../../shared/api';
+import type { ConversationItem, ScreenPrompt, SessionState, SideChat } from '../../shared/api';
+import type { SideAnchor } from './SidePanel';
 import { describeTool, summarizeSteps, toTurns, type Turn } from './turns';
 
 type Tool = Extract<ConversationItem, { kind: 'tool' }>;
@@ -15,10 +16,17 @@ interface Props {
   onShowTerminal: () => void;
   /** A step to scroll to and highlight (e.g. from the audit); `at` makes the same step focusable again. */
   focus?: { id: string; at: number } | null;
+  /** Side chats, shown under the messages they reply to. */
+  sideChats?: SideChat[];
+  /** Ask a side question about a message. */
+  onAskSide?: (anchor: SideAnchor) => void;
+  onOpenSide?: (chatId: string) => void;
 }
 
-export function Conversation({ items, state, sentFromApp, onAnswer, onShowTerminal, focus }: Props) {
+export function Conversation({ items, state, sentFromApp, onAnswer, onShowTerminal, focus, sideChats, onAskSide, onOpenSide }: Props) {
   const turns = toTurns(items);
+  const threads = new Map<string, SideChat[]>();
+  for (const c of sideChats ?? []) if (c.anchor.id) threads.set(c.anchor.id, [...(threads.get(c.anchor.id) ?? []), c]);
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   // Showing a step leaves the scroll where the step is, instead of following new output.
@@ -56,6 +64,9 @@ export function Conversation({ items, state, sentFromApp, onAnswer, onShowTermin
             waiting={state.status === 'waiting'}
             fromApp={t.user ? sentFromApp.has(t.user.id) : false}
             focus={focus && t.steps.some((s) => s.id === focus.id) ? focus : null}
+            threads={threads}
+            onAskSide={onAskSide}
+            onOpenSide={onOpenSide}
           />
         ))}
         {state.queued.map((q, i) => (
@@ -95,6 +106,9 @@ const TurnView = memo(function TurnView({
   waiting,
   fromApp,
   focus,
+  threads,
+  onAskSide,
+  onOpenSide,
 }: {
   turn: Turn;
   cwd: string | null;
@@ -103,25 +117,67 @@ const TurnView = memo(function TurnView({
   waiting: boolean;
   fromApp: boolean;
   focus: { id: string; at: number } | null;
+  threads: Map<string, SideChat[]>;
+  onAskSide?: (anchor: SideAnchor) => void;
+  onOpenSide?: (chatId: string) => void;
 }) {
+  // The answer can be asked about once it's written: its text is what Claude said after its last step.
+  const answerText = turn.answer.flatMap((i) => (i.kind === 'assistant' ? [i.text] : [])).join('\n\n');
+  const answerId = turn.answer.findLast((i) => i.kind === 'assistant')?.id ?? null;
+  const answerDone = !(last && live);
   return (
     <>
       {turn.user && (
-        <div className="u-msg">
-          <div className="u-text">{turn.user.text}</div>
-          {turn.user.images > 0 && <div className="via">{turn.user.images} image(s) attached</div>}
-          <span className="via">
-            {time(turn.user.ts)} · {fromApp ? 'from Companion' : 'typed in the terminal'}
-          </span>
+        <div className="msg-wrap user">
+          <div className="u-msg">
+            <div className="u-text">{turn.user.text}</div>
+            {turn.user.images > 0 && <div className="via">{turn.user.images} image(s) attached</div>}
+            <span className="via">
+              {time(turn.user.ts)} · {fromApp ? 'from Companion' : 'typed in the terminal'}
+            </span>
+          </div>
+          {onAskSide && (
+            <button className="side-ask" onClick={() => onAskSide({ id: turn.user!.id, role: 'user', text: turn.user!.text })}>
+              Ask on the side
+            </button>
+          )}
+          <SideBadges chats={threads.get(turn.user.id)} onOpen={onOpenSide} />
         </div>
       )}
       {turn.steps.length > 0 && <Steps steps={turn.steps} cwd={cwd} openByDefault={last && live} waiting={last && waiting} focus={focus} />}
-      {turn.answer.map((item) => (
-        <AnswerItem key={item.id} item={item} cwd={cwd} />
-      ))}
+      {turn.answer.length > 0 && (
+        <div className="msg-wrap answer">
+          {turn.answer.map((item) => (
+            <AnswerItem key={item.id} item={item} cwd={cwd} />
+          ))}
+          {onAskSide && answerId && answerDone && (
+            <button className="side-ask" onClick={() => onAskSide({ id: answerId, role: 'assistant', text: answerText })}>
+              Ask on the side
+            </button>
+          )}
+          {answerId && <SideBadges chats={threads.get(answerId)} onOpen={onOpenSide} />}
+        </div>
+      )}
     </>
   );
 });
+
+/** Links to the side chats on a message, like a Slack thread's reply count. */
+function SideBadges({ chats, onOpen }: { chats: SideChat[] | undefined; onOpen?: (chatId: string) => void }) {
+  if (!chats?.length) return null;
+  return (
+    <div className="side-badges">
+      {chats.map((c) => {
+        const replies = c.messages.filter((m) => m.role === 'assistant').length;
+        return (
+          <button key={c.id} className="side-badge" onClick={() => onOpen?.(c.id)} title={c.messages[0]?.text}>
+            💬 {c.running ? 'answering…' : `${replies} repl${replies === 1 ? 'y' : 'ies'}`}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function Steps({
   steps,

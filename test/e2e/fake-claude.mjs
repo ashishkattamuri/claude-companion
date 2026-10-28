@@ -4,11 +4,13 @@
 //   fake attach <job>                    connect this terminal; every attached terminal shares it
 //   fake stop <job>                      end the session
 //   fake -p --json-schema <schema> …     one structured answer (only the audit review's, for now)
+//   fake -p --resume <id> [--fork-session --session-id <new>] --output-format stream-json
+//                                        a side chat: answers in a fork of a session, never touching it
 // The daemon registers in <claude dir>/sessions/<pid>.json (kind "bg"), appends to the transcript,
 // and shows a numbered permission menu for prompts containing "needs-approval".
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,14 +28,15 @@ else if (cmd === 'plugin') {
 else if (cmd === 'attach') attach(rest[0]);
 else if (cmd === 'stop') stop(rest[0]);
 else if (cmd === '__daemon') runDaemon(rest);
-else if (cmd === '-p') print(rest, readFileSync(0, 'utf8'));
+else if (cmd === '-p') await print(rest, readFileSync(0, 'utf8'));
 else {
   console.error(`fake claude: unsupported arguments: ${process.argv.slice(2).join(' ')}`);
   process.exit(2);
 }
 
 // `claude -p` with a JSON schema: answers an audit review by flagging the first step it was shown.
-function print(args, prompt) {
+async function print(args, prompt) {
+  if (args.includes('stream-json')) return sideAnswer(args, prompt);
   const schema = JSON.parse(args[args.indexOf('--json-schema') + 1] ?? '{}');
   const step = Number(/^#(\d+) /m.exec(prompt)?.[1] ?? 1);
   let out;
@@ -53,6 +56,61 @@ function print(args, prompt) {
     process.exit(2);
   }
   console.log(JSON.stringify({ type: 'result', is_error: false, result: '', structured_output: out, total_cost_usd: 0 }));
+}
+
+// A side chat, like `claude -p --resume`: forking copies the session's transcript under the new id
+// and leaves the original alone. The answer quotes the session's first prompt, to show it knew it.
+async function sideAnswer(args, prompt) {
+  const opt = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : null);
+  const resume = opt('--resume');
+  const projects = join(claudeDir, 'projects');
+  const dir = readdirSync(projects).map((d) => join(projects, d)).find((d) => existsSync(join(d, `${resume}.jsonl`)));
+  const from = dir && join(dir, `${resume}.jsonl`);
+  const say = (ev) => console.log(JSON.stringify(ev));
+  if (!from) {
+    say({ type: 'result', is_error: true, errors: [`No conversation found with session ID: ${resume}`], session_id: resume });
+    return;
+  }
+  const sessionId = args.includes('--fork-session') ? (opt('--session-id') ?? randomUUID()) : resume;
+  const transcript = join(dir, `${sessionId}.jsonl`);
+  if (sessionId !== resume) writeFileSync(transcript, readFileSync(from, 'utf8').replaceAll(resume, sessionId));
+  mkdirSync(join(claudeDir, 'fake-args'), { recursive: true });
+  writeFileSync(join(claudeDir, 'fake-args', `side-${sessionId}.json`), JSON.stringify(args));
+  // Lenient like Claude Code: the fixture has a broken line on purpose.
+  const records = readFileSync(transcript, 'utf8').trim().split('\n').flatMap((l) => {
+    try {
+      return [JSON.parse(l)];
+    } catch {
+      return [];
+    }
+  });
+  const first = records.find((r) => r.type === 'user' && typeof r.message?.content === 'string')?.message.content;
+  const question = prompt.trim().split('\n').at(-1);
+  say({ type: 'system', subtype: 'init', session_id: sessionId, cwd: process.cwd(), tools: ['Read'] });
+  if (prompt.includes('slow-side')) {
+    say({ type: 'assistant', session_id: sessionId, message: { content: [{ type: 'tool_use', name: 'Read', input: { file_path: 'notes.md' } }] } });
+    await new Promise((r) => setTimeout(r, 2500));
+  }
+  const text = `side: ${question} (the chat began with "${first}")`;
+  const cwd = process.cwd();
+  let last = records.at(-1)?.uuid ?? null;
+  for (const rec of [
+    { type: 'user', message: { role: 'user', content: prompt } },
+    { type: 'assistant', message: { role: 'assistant', model: 'claude-fake-1', content: [{ type: 'text', text }] } },
+  ]) {
+    const uuid = randomUUID();
+    appendFileSync(transcript, `${JSON.stringify({ uuid, parentUuid: last, sessionId, cwd, timestamp: new Date().toISOString(), ...rec })}\n`);
+    last = uuid;
+  }
+  say({ type: 'assistant', session_id: sessionId, message: { content: [{ type: 'text', text }] } });
+  say({
+    type: 'result',
+    is_error: false,
+    result: text,
+    session_id: sessionId,
+    total_cost_usd: 0.004,
+    usage: { input_tokens: 40, cache_read_input_tokens: 18_000, cache_creation_input_tokens: 0, output_tokens: 25 },
+  });
 }
 
 // `claude mcp add|get|remove`, enough for the user-scope registration.

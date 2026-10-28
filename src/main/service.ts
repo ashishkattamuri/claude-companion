@@ -44,10 +44,13 @@ import type {
   SessionListItem,
   SessionSnapshot,
   SessionState,
+  SideAsk,
+  SideChat,
 } from '../shared/api.js';
 import { findBackground, startBackground, stopBackground } from './background.js';
 import { branchContext } from './branch.js';
 import { SessionChannel, type ChannelDeps, type ChannelInfo } from './session.js';
+import { SideChats } from './side-chat.js';
 import { openInTerminalApp } from './terminal-app.js';
 import { findTranscript } from './transcript.js';
 
@@ -67,6 +70,8 @@ export interface ServiceDeps {
   onData?: (sessionId: string, data: string, end: number) => void;
   onSent?: (sessionId: string, itemId: string) => void;
   onChanged?: () => void;
+  /** A session's side chats changed. */
+  onSideChanged?: (sessionId: string) => void;
   /** Show this session in the window, optionally with a message ready in the composer. */
   onNavigate?: (sessionId: string, draft?: string) => void;
   /** How to run Companion's MCP server inside the sessions it starts (gives Claude the new-chat tool). */
@@ -103,9 +108,17 @@ export class CompanionService {
   private plugins: PluginCli;
   /** Audits in progress, by session. */
   private auditing = new Map<string, Promise<Result<AuditView>>>();
+  private side: SideChats;
 
   constructor(private d: ServiceDeps) {
     this.plugins = new PluginCli(d.claudeBin ?? process.env.COMPANION_CLAUDE_BIN ?? 'claude', d.env);
+    this.side = new SideChats({
+      db: d.db,
+      projectsDir: d.cfg.projectsDir,
+      claudeBin: d.claudeBin ?? process.env.COMPANION_CLAUDE_BIN ?? 'claude',
+      env: d.env,
+      onChanged: (sessionId) => d.onSideChanged?.(sessionId),
+    });
     if (d.mcp) {
       this.mcpConfigPath = join(dirname(d.cfg.dbPath), 'mcp.json');
       mkdirSync(dirname(this.mcpConfigPath), { recursive: true });
@@ -139,7 +152,7 @@ export class CompanionService {
     if (!query.search) {
       // Running sessions with no transcript yet.
       const known = new Set(rows.map((r) => r.id));
-      const deleted = this.idSet(`SELECT session_id AS id FROM deleted_sessions`);
+      const deleted = this.idSet(`SELECT session_id AS id FROM deleted_sessions UNION SELECT id FROM side_chats`);
       for (const l of live.values()) {
         if (known.has(l.sessionId) || deleted.has(l.sessionId)) continue;
         const title = this.linkTitle(l.sessionId) ?? this.channels.get(l.sessionId)?.state.title ?? l.name ?? '(new session)';
@@ -257,6 +270,7 @@ export class CompanionService {
       }
       const notes = readNotes(this.d.db, id);
       if (notes) rmSync(notes.path, { force: true });
+      this.side.deleteFor(id);
     }
 
     const now = new Date().toISOString();
@@ -372,6 +386,27 @@ export class CompanionService {
     this.auditing.set(sessionId, run);
     this.d.onChanged?.();
     return run;
+  }
+
+  // ── Side chats ───────────────────────────────────────────────────────────────────────────────
+
+  listSideChats(sessionId: string): SideChat[] {
+    return this.side.list(sessionId);
+  }
+
+  /** Asks about a chat in a fork of it, on the chat's own model so its history comes from the cache. */
+  askSide(sessionId: string, ask: SideAsk): Result<string> {
+    this.refresh();
+    const ch = this.channels.get(sessionId);
+    return this.side.ask(sessionId, this.cwdOf(sessionId), ch?.state.facts.model ?? null, ask);
+  }
+
+  stopSide(chatId: string): void {
+    this.side.stop(chatId);
+  }
+
+  deleteSideChat(chatId: string): void {
+    this.side.delete(chatId);
   }
 
   listProjects() {
@@ -663,6 +698,7 @@ export class CompanionService {
   /** Detaches from everything. Background sessions keep running without Companion. */
   disposeAll(): void {
     for (const t of this.notesTimers.values()) clearTimeout(t);
+    this.side.stopAll();
     for (const id of [...this.channels.keys()]) this.dropChannel(id);
   }
 

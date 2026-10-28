@@ -19,7 +19,8 @@
     "test:e2e": "node test/e2e/run.mjs",
     "postinstall": "electron-rebuild -f -w better-sqlite3,node-pty",
     "test:live": "ELECTRON_RUN_AS_NODE=1 electron test/e2e/live.mjs",
-    "test:live-branch": "ELECTRON_RUN_AS_NODE=1 electron test/e2e/live-branch.mjs"
+    "test:live-branch": "ELECTRON_RUN_AS_NODE=1 electron test/e2e/live-branch.mjs",
+    "test:live-side": "node test/e2e/live-side.mjs"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.3.0",

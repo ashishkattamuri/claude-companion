@@ -6,7 +6,7 @@ import { loadConfig } from '../config.js';
 import { readLiveSessions } from '../ingest/live.js';
 import { socketPath } from '../mcp/protocol.js';
 import { openDb } from '../store/db.js';
-import type { MarketplaceAction, NewSessionRequest, PluginAction, ServerConfig } from '../shared/api.js';
+import type { MarketplaceAction, NewSessionRequest, PluginAction, ServerConfig, SideAsk } from '../shared/api.js';
 import { listenForSessions } from './app-socket.js';
 import { resolveShellPath, sessionEnv } from './env.js';
 import { CompanionService } from './service.js';
@@ -57,6 +57,7 @@ app.whenReady().then(() => {
     onData: (id, data, end) => send('term:data', id, data, end),
     onSent: (id, itemId) => send('session:sent', id, itemId),
     onChanged: () => send('changed'),
+    onSideChanged: (id) => send('side:changed', id),
   });
 
   ipcMain.handle('sessions:list', (_e, q) => service.listSessions(q ?? {}));
@@ -177,6 +178,10 @@ app.whenReady().then(() => {
   ipcMain.handle('term:replay', (_e, id: string) => service.replay(id));
   ipcMain.on('term:write', (_e, id: string, data: string) => service.write(id, data));
   ipcMain.on('term:resize', (_e, id: string, cols: number, rows: number) => service.resize(id, cols, rows));
+  ipcMain.handle('side:list', (_e, id: string) => service.listSideChats(id));
+  ipcMain.handle('side:ask', (_e, id: string, ask: SideAsk) => service.askSide(id, ask));
+  ipcMain.on('side:stop', (_e, chatId: string) => service.stopSide(chatId));
+  ipcMain.handle('side:delete', (_e, chatId: string) => service.deleteSideChat(chatId));
   ipcMain.handle('session:restartWithTools', (_e, id: string) => service.restartWithTools(id));
   ipcMain.handle('tools:install', () => service.installToolsEverywhere());
   ipcMain.handle('session:extras', (_e, id: string) => service.extras(id));

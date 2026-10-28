@@ -58,7 +58,13 @@ export function scan(db: DB, cfg: Config): ScanResult {
   const { main, subagentCount } = listTranscripts(cfg.projectsDir);
   result.subagentFiles = subagentCount;
   const ingester = new FileIngester(db, cfg, result);
-  const deleted = new Set(db.prepare<[], { session_id: string }>(`SELECT session_id FROM deleted_sessions`).all().map((r) => r.session_id));
+  // Deleted chats, and side-chat forks: copies of a chat's history that belong to its side threads.
+  const deleted = new Set(
+    db
+      .prepare<[], { session_id: string }>(`SELECT session_id FROM deleted_sessions UNION SELECT id FROM side_chats`)
+      .all()
+      .map((r) => r.session_id),
+  );
   for (const path of main) {
     if (deleted.has(basename(path, '.jsonl'))) continue;
     result.filesSeen++;

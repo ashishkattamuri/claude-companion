@@ -191,4 +191,28 @@ export const MIGRATIONS: string[] = [
     created_at   TEXT NOT NULL
   );
   `,
+  `
+  -- Side chats: questions about a chat asked in a fork of it, so they never enter its context.
+  -- The id is the fork's Claude Code session id; its transcript is never ingested as a session.
+  CREATE TABLE side_chats (
+    id          TEXT PRIMARY KEY,
+    session_id  TEXT NOT NULL,     -- the chat it was asked about
+    anchor_id   TEXT,              -- the message it replies to
+    anchor_role TEXT NOT NULL,     -- user | assistant
+    anchor_text TEXT NOT NULL,     -- that message, as shown at the top of the thread
+    created_at  TEXT NOT NULL
+  );
+  CREATE INDEX side_chats_session ON side_chats(session_id);
+
+  CREATE TABLE side_messages (
+    id          INTEGER PRIMARY KEY,
+    chat_id     TEXT NOT NULL REFERENCES side_chats(id) ON DELETE CASCADE,
+    role        TEXT NOT NULL,     -- user | assistant
+    text        TEXT NOT NULL,
+    ts          TEXT NOT NULL,
+    usage_json  TEXT,              -- tokens (fresh, cached, written to cache, output) and cost, for answers
+    error       TEXT
+  );
+  CREATE INDEX side_messages_chat ON side_messages(chat_id);
+  `,
 ];

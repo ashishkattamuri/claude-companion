@@ -103,6 +103,48 @@ try {
   check('shows an earlier conversation', await until(async () => (await thread()).includes('Also add a test for exponential backoff')));
   check('marks it as not running', (await status()).includes('Not running'));
 
+  // Side chats: a question about a message, answered in a fork of the chat. The thread shows only
+  // that message, and the chat's own transcript never changes.
+  {
+    const parentFile = join(fixtureDir, `${SESSION}.jsonl`);
+    const before = readFileSync(parentFile, 'utf8');
+    const message = page.locator('.msg-wrap.user').first();
+    await message.hover();
+    await message.locator('.side-ask').click();
+    const panel = page.locator('.side-panel');
+    const anchorText = await message.locator('.u-text').innerText();
+    check('side chat opens on the message it replies to', await until(async () => (await panel.locator('.side-anchor').innerText()).includes(anchorText.slice(0, 40))));
+    check('side chat shows only that message, not the rest of the chat', !(await panel.innerText()).includes('Also add a test for exponential backoff'));
+    await panel.locator('textarea').fill('slow-side what was the retry limit?');
+    await panel.locator('textarea').press('Enter');
+    check('side chat shows what Claude is doing while it answers', await until(async () => (await panel.innerText()).includes('Read notes.md')));
+    check(
+      'side chat answers from the whole chat',
+      await until(async () => (await panel.innerText()).includes('side: slow-side what was the retry limit? (the chat began with "Add retry logic'), 8000),
+    );
+    check('side chat shows how much came from the cache', (await panel.locator('.side-usage').innerText()).includes('18k from cache'));
+    const sideArgs = () =>
+      readdirSync(join(claudeDir, 'fake-args'))
+        .filter((f) => f.startsWith('side-'))
+        .map((f) => [f.slice(5, -5), JSON.parse(readFileSync(join(claudeDir, 'fake-args', f), 'utf8'))]);
+    const [forkId, args] = sideArgs()[0] ?? [];
+    check('side chat runs in a fork of the chat', !!args && args.includes('--fork-session') && args[args.indexOf('--resume') + 1] === SESSION);
+    check("the chat's own transcript is untouched", readFileSync(parentFile, 'utf8') === before);
+    check('the message shows a reply badge', await until(async () => (await page.locator('.convo .side-badge').innerText()).includes('1 reply')));
+    await panel.locator('textarea').fill('and how long between tries?');
+    await panel.locator('textarea').press('Enter');
+    check('a follow-up continues the same thread', await until(async () => (await panel.innerText()).includes('side: and how long between tries?')));
+    const follow = sideArgs().find(([id]) => id === forkId)?.[1];
+    check('a follow-up resumes the fork instead of forking again', !!follow && !follow.includes('--fork-session') && follow[follow.indexOf('--resume') + 1] === forkId);
+    await page.screenshot({ path: join(shots, '1b-side-chat.png') });
+    // The tick that rescans transcripts runs every 5s.
+    await new Promise((r) => setTimeout(r, 6000));
+    check('the fork is not listed as a chat', (await page.locator('.s-row', { hasText: 'Webhook retry logic' }).count()) === 1);
+    await panel.locator('.side-head button', { hasText: 'Delete' }).click();
+    check('deleting the thread deletes its fork', await until(async () => !existsSync(join(fixtureDir, `${forkId}.jsonl`))));
+    await page.locator('.side-head button[aria-label^="Close"]').click();
+  }
+
   await page.keyboard.press('Meta+n');
   await page.selectOption('#ns-project', project);
   await page.fill('#ns-prompt', 'hello from the sheet');

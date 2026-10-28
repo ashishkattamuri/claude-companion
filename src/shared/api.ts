@@ -104,6 +104,49 @@ export interface SessionExtras {
   children: { id: string; title: string; kind: string }[];
 }
 
+/** Tokens and cost of one side-chat answer. `cached` is the chat's history read back from the prompt cache. */
+export interface SideUsage {
+  fresh: number;
+  cached: number;
+  cacheWrite: number;
+  output: number;
+  costUsd: number | null;
+}
+
+export interface SideMessage {
+  role: 'user' | 'assistant';
+  text: string;
+  ts: string;
+  usage: SideUsage | null;
+  error: string | null;
+}
+
+/**
+ * A side chat: a question about a chat, answered in a fork of it so the chat's own context never
+ * sees it. The thread shows only the message it replies to, not the forked history.
+ */
+export interface SideChat {
+  id: string;
+  sessionId: string;
+  anchor: { id: string | null; role: 'user' | 'assistant'; text: string };
+  createdAt: string;
+  messages: SideMessage[];
+  /** An answer is being written. */
+  running: boolean;
+  /** The answer so far, while running. */
+  partial: string | null;
+  /** What Claude is doing while running, e.g. "Reading src/app.ts". */
+  activity: string | null;
+}
+
+export interface SideAsk {
+  /** Continue this thread; omitted to start one. */
+  chatId?: string;
+  /** The message a new thread replies to. */
+  anchor?: { id: string | null; role: 'user' | 'assistant'; text: string };
+  text: string;
+}
+
 export interface RecapView {
   recap: RecapRow | null;
   status: AnalyzerStatus | null;
@@ -166,6 +209,13 @@ export interface CompanionApi {
    * for wasted steps. `null` means cancelled. Resolves when the audit is done.
    */
   runAudit(sessionId: string): Promise<Result<AuditView | null>>;
+  listSideChats(sessionId: string): Promise<SideChat[]>;
+  /** Asks a side question (a new thread, or a follow-up). Resolves with the thread id once it starts. */
+  askSide(sessionId: string, ask: SideAsk): Promise<Result<string>>;
+  stopSide(chatId: string): void;
+  deleteSideChat(chatId: string): Promise<void>;
+  /** A session's side chats changed (an answer streamed in, finished, or a thread was deleted). */
+  onSideChanged(cb: (sessionId: string) => void): () => void;
   /** Restarts a chat that lacks Companion's tools as a copy that has them (history kept). */
   restartWithTools(sessionId: string): Promise<Result<string>>;
   /** Registers the new-chat tool for every Claude session, including ones in a terminal. */

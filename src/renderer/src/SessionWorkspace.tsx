@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { api } from './api';
 import { AuditPanel, useAudit, wasteLabel } from './AuditPanel';
 import { Composer, shortModel } from './Composer';
 import { Conversation } from './Conversation';
 import { DetailsRail, useExtras } from './DetailsRail';
+import { SidePanel, useSideChats, type SideAnchor, type SideView } from './SidePanel';
 import { shortPath } from './format';
 import { useSession } from './store';
 import { TerminalView } from './TerminalView';
@@ -38,6 +39,10 @@ export function SessionWorkspace({
   const [mode, setMode] = useState<View>(initialView ?? 'conversation');
   const [focus, setFocus] = useState<{ id: string; at: number } | null>(null);
   const [rail, setRail] = useState(true);
+  const sideChats = useSideChats(sessionId);
+  const [side, setSide] = useState<SideView | null>(null);
+  const askSide = useCallback((anchor: SideAnchor) => setSide({ anchor }), []);
+  const openSide = useCallback((chatId: string) => setSide({ chatId }), []);
   if (!view) return <div className="loading">Loading session…</div>;
   const { state, items } = view;
   const status = state.mode === 'mirror' ? { label: 'View only · plain terminal', tone: 'muted' } : STATUS[state.status]!;
@@ -49,7 +54,7 @@ export function SessionWorkspace({
     });
 
   return (
-    <div className={`workspace ${rail ? '' : 'no-rail'}`}>
+    <div className={`workspace ${side ? 'side' : rail ? '' : 'no-rail'}`}>
       <section className="main">
         <header className="head">
           <div className="head-text">
@@ -90,7 +95,22 @@ export function SessionWorkspace({
                 </button>
               ))}
             </div>
-            <button className="icon-btn" onClick={() => setRail(!rail)} aria-pressed={rail}>
+            <button
+              className="icon-btn"
+              onClick={() => setSide(side ? null : { list: true })}
+              aria-pressed={!!side}
+              title="Questions about this chat, asked on the side so they don't add to its context"
+            >
+              Side chats{sideChats.length ? ` · ${sideChats.length}` : ''}
+            </button>
+            <button
+              className="icon-btn"
+              onClick={() => {
+                setSide(null);
+                setRail(side ? true : !rail);
+              }}
+              aria-pressed={rail && !side}
+            >
               Details
             </button>
             {running && (
@@ -130,6 +150,9 @@ export function SessionWorkspace({
                 focus={focus}
                 onAnswer={(key) => api.answer(sessionId, key)}
                 onShowTerminal={() => setMode('split')}
+                sideChats={sideChats}
+                onAskSide={askSide}
+                onOpenSide={openSide}
               />
               <Composer
                 state={state}
@@ -148,7 +171,8 @@ export function SessionWorkspace({
           )}
         </div>
       </section>
-      {rail && <DetailsRail state={state} items={items} extras={extras} onNavigate={onNavigate} onError={onError} />}
+      {side && <SidePanel sessionId={sessionId} chats={sideChats} view={side} onView={setSide} onClose={() => setSide(null)} onError={onError} />}
+      {rail && !side && <DetailsRail state={state} items={items} extras={extras} onNavigate={onNavigate} onError={onError} />}
     </div>
   );
 }

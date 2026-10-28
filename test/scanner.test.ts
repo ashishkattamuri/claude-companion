@@ -1,4 +1,4 @@
-import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -40,6 +40,16 @@ afterEach(() => {
 });
 
 describe('scan', () => {
+  it("skips side-chat forks: copies of a chat's history that belong to its side threads", () => {
+    const FORK = '22222222-2222-4222-8222-222222222222';
+    writeFileSync(join(root, 'claude', 'projects', '-work-demo-app', `${FORK}.jsonl`), readFileSync(transcript, 'utf8').replaceAll(SESSION, FORK));
+    db.prepare(`INSERT INTO side_chats(id, session_id, anchor_role, anchor_text, created_at) VALUES (?, ?, 'user', 'x', '')`).run(FORK, SESSION);
+    const r = scan(db, config());
+    expect(r.filesSeen).toBe(1);
+    expect(count(`SELECT COUNT(*) AS n FROM sessions WHERE id = '${FORK}'`)).toBe(0);
+    expect(count(`SELECT COUNT(*) AS n FROM sessions WHERE id = '${SESSION}'`)).toBe(1);
+  });
+
   it('ingests a transcript into sessions, projects and messages', () => {
     const r = scan(db, config());
     expect(r).toMatchObject({ filesSeen: 1, filesChanged: 1, subagentFiles: 1, invalidLines: 1 });
