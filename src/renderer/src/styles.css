@@ -126,7 +126,9 @@ h1, h2 { text-wrap: balance; }
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 18px; border-bottom: 1px solid var(--line); -webkit-app-region: drag; min-height: 58px; }
 .head button, .head .seg { -webkit-app-region: no-drag; }
-.head-text { min-width: 0; }
+/* The title keeps room to be read; the buttons wrap below it when the side panel narrows the header. */
+.head { flex-wrap: wrap; }
+.head-text { min-width: 0; flex: 1 1 300px; }
 .head-title { display: flex; gap: 10px; align-items: center; min-width: 0; }
 .head h1 { font-size: 15.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .crumbs { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
