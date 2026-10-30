@@ -79,7 +79,7 @@ export function SidePanel({ sessionId, chats, view, onView, onClose, onError }: 
         <div className="side-body">
           {chats.length === 0 && (
             <p className="muted small">
-              Ask about any message without adding to this chat: hover a message and choose <b>Ask on the side</b>.
+              Ask about any message without adding to this chat: hover a message and click its reply arrow (<b>Ask on the side</b>).
             </p>
           )}
           {chats.map((c) => (

@@ -137,8 +137,8 @@ const TurnView = memo(function TurnView({
             </span>
           </div>
           {onAskSide && (
-            <button className="side-ask" onClick={() => onAskSide({ id: turn.user!.id, role: 'user', text: turn.user!.text })}>
-              Ask on the side
+            <button className="side-ask" title="Ask on the side" aria-label="Ask on the side" onClick={() => onAskSide({ id: turn.user!.id, role: 'user', text: turn.user!.text })}>
+              <ReplyIcon />
             </button>
           )}
           <SideBadges chats={threads.get(turn.user.id)} onOpen={onOpenSide} />
@@ -151,8 +151,8 @@ const TurnView = memo(function TurnView({
             <AnswerItem key={item.id} item={item} cwd={cwd} />
           ))}
           {onAskSide && answerId && answerDone && (
-            <button className="side-ask" onClick={() => onAskSide({ id: answerId, role: 'assistant', text: answerText })}>
-              Ask on the side
+            <button className="side-ask" title="Ask on the side" aria-label="Ask on the side" onClick={() => onAskSide({ id: answerId, role: 'assistant', text: answerText })}>
+              <ReplyIcon />
             </button>
           )}
           {answerId && <SideBadges chats={threads.get(answerId)} onOpen={onOpenSide} />}
@@ -161,6 +161,16 @@ const TurnView = memo(function TurnView({
     </>
   );
 });
+
+/** A reply arrow, as on a message's thread button in Slack. */
+function ReplyIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6.5 3.5 2.5 7.5l4 4" />
+      <path d="M2.5 7.5h6.5a4.5 4.5 0 0 1 4.5 4.5v.5" />
+    </svg>
+  );
+}
 
 /** Links to the side chats on a message, like a Slack thread's reply count. */
 function SideBadges({ chats, onOpen }: { chats: SideChat[] | undefined; onOpen?: (chatId: string) => void }) {

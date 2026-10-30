@@ -110,6 +110,8 @@ try {
     const before = readFileSync(parentFile, 'utf8');
     const message = page.locator('.msg-wrap.user').first();
     await message.hover();
+    await page.waitForTimeout(200);
+    await page.screenshot({ path: join(shots, '1a-side-hover.png'), clip: { x: 268, y: 60, width: 900, height: 260 } });
     await message.locator('.side-ask').click();
     const panel = page.locator('.side-panel');
     const anchorText = await message.locator('.u-text').innerText();
