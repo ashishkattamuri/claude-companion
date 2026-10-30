@@ -6,6 +6,7 @@ import { detect } from '../analyze/audit/detectors.js';
 import { chunkTurns, review, reviewModel } from '../analyze/audit/review.js';
 import { loadTimeline } from '../analyze/audit/timeline.js';
 import { buildAuditView, type AuditView } from '../analyze/audit/view.js';
+import { readEntries, searchEarlier, type EarlierChat } from '../analyze/earlier.js';
 import type { LlmClient } from '../analyze/llm.js';
 import { notesBehind, notesPath, readNotes, recentExchanges, updateNotes } from '../analyze/notes.js';
 import { getRecap, recapDay, removeGoneSessionsFromRecaps, removeSessionsFromRecaps } from '../analyze/recap.js';
@@ -34,7 +35,7 @@ import type { LiveSession } from '../ingest/live.js';
 import { listTranscripts, scan } from '../ingest/scanner.js';
 import type { DB } from '../store/db.js';
 import { getSession, listProjects, listSessions, type SessionRow } from '../store/queries.js';
-import type { SocketRequest, SocketResponse } from '../mcp/protocol.js';
+import type { SearchEarlierRequest, SocketRequest, SocketResponse } from '../mcp/protocol.js';
 import type {
   AuditState,
   NewSessionRequest,
@@ -84,6 +85,7 @@ export interface ServiceDeps {
 
 const ok: Result = { ok: true, value: undefined };
 const NEW_CHAT_TOOL = 'mcp__companion__start_new_chat';
+const SEARCH_EARLIER_TOOL = 'mcp__companion__search_earlier_conversation';
 /** `claude mcp add` name for the user-scope registration. */
 const MCP_NAME = 'companion';
 
@@ -126,9 +128,9 @@ export class CompanionService {
     }
   }
 
-  /** Flags for every session Companion starts: its MCP server, with the new-chat tool pre-approved. */
+  /** Flags for every session Companion starts: its MCP server, with its tools pre-approved. */
   private launchArgs(): string[] {
-    return this.mcpConfigPath ? ['--mcp-config', this.mcpConfigPath, '--allowedTools', NEW_CHAT_TOOL] : [];
+    return this.mcpConfigPath ? ['--mcp-config', this.mcpConfigPath, '--allowedTools', NEW_CHAT_TOOL, SEARCH_EARLIER_TOOL] : [];
   }
 
   private get channelDeps(): ChannelDeps {
@@ -704,7 +706,7 @@ export class CompanionService {
 
   // ── Opening new chats from a session ─────────────────────────────────────────────────────────
 
-  /** Requests from Companion's MCP server inside a session (Claude calling the new-chat tool). */
+  /** Requests from Companion's MCP server inside a session (Claude calling one of its tools). */
   async handleSocket(req: SocketRequest): Promise<SocketResponse> {
     if (req.method === 'hello') {
       if (req.params.sessionId) {
@@ -713,6 +715,7 @@ export class CompanionService {
       }
       return { ok: true, message: 'hello' };
     }
+    if (req.method === 'search_earlier') return this.searchEarlier(req.params);
     if (req.method !== 'new_chat') return { ok: false, error: 'Unknown request.' };
     const parentId = req.params.sessionId;
     if (!parentId) return { ok: false, error: 'Could not tell which chat the request came from.' };
@@ -773,6 +776,52 @@ export class CompanionService {
     this.d.onChanged?.();
     this.d.onNavigate?.(entry.sessionId);
     return { ok: true, value: entry.sessionId };
+  }
+
+  /**
+   * The chats a chat was opened from, nearest first. Restarts are skipped: a restarted chat is a
+   * copy of the same conversation, so the search goes on to the chat it was opened from.
+   */
+  earlierChats(sessionId: string): { id: string; title: string }[] {
+    const up = this.d.db.prepare(
+      `SELECT l.parent_id AS id, l.kind, COALESCE(s.title, s.name, 'Earlier chat') AS title FROM session_links l
+       LEFT JOIN sessions s ON s.id = l.parent_id WHERE l.child_id = ?`,
+    );
+    const out: { id: string; title: string }[] = [];
+    const seen = new Set([sessionId]);
+    for (let id = sessionId; ; ) {
+      const row = up.get(id) as { id: string; kind: string; title: string } | undefined;
+      if (!row || seen.has(row.id)) return out;
+      seen.add(row.id);
+      if (row.kind !== 'restart') out.push({ id: row.id, title: row.title });
+      id = row.id;
+    }
+  }
+
+  /** Claude looking up a detail in the conversation its chat was opened from (and only those). */
+  private searchEarlier(p: SearchEarlierRequest['params']): SocketResponse {
+    if (!p.sessionId) return { ok: false, error: 'Could not tell which chat the request came from.' };
+    const lineage = this.earlierChats(p.sessionId);
+    if (!lineage.length) return { ok: false, error: 'This chat was not opened from another chat, so there is no earlier conversation to search.' };
+    let picked = p.scope === 'lineage' ? lineage : lineage.slice(0, 1);
+    if (p.chat) {
+      const c = lineage.find((l) => l.id === p.chat);
+      if (!c) return { ok: false, error: `Chat ${p.chat} is not one this chat was opened from.` };
+      picked = [c];
+    }
+    const chats: EarlierChat[] = [];
+    for (const c of picked) {
+      const path = this.transcriptOf(c.id);
+      if (!path) continue;
+      const depth = lineage.indexOf(c);
+      chats.push({ ...c, relation: depth === 0 ? 'parent' : `${'great-'.repeat(depth - 1)}grandparent`, entries: readEntries(path) });
+    }
+    if (!chats.length) return { ok: false, error: 'The earlier conversation\'s transcript was not found.' };
+    try {
+      return { ok: true, message: searchEarlier(chats, p) };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
   }
 
   /** A fresh session that picks up where this one is, without its long context. */

@@ -94,6 +94,14 @@ export function describeTool(t: Tool, cwd: string | null): ToolView {
       return { verb: v('Used skill', 'Using skill'), target: String(i.skill ?? ''), added: 0, removed: 0, file: null };
     case 'mcp__companion__start_new_chat':
       return { verb: v('Opened a new chat', 'Opening a new chat'), target: String(i.title ?? ''), added: 0, removed: 0, file: null };
+    case 'mcp__companion__search_earlier_conversation':
+      return {
+        verb: v('Looked up the earlier chat', 'Looking up the earlier chat'),
+        target: String(i.query ?? (i.around ? `around step #${i.around}` : 'outline')),
+        added: 0,
+        removed: 0,
+        file: null,
+      };
     default: {
       const mcp = t.name.match(/^mcp__(.+?)__(.+)$/);
       if (mcp) return { verb: v('Used', 'Using'), target: `${mcp[2]} (${mcp[1]})`, added: 0, removed: 0, file: null };
@@ -124,7 +132,7 @@ export function summarizeSteps(steps: ConversationItem[]): string {
   const read = count(['Read']);
   const edited = count(['Edit', 'MultiEdit', 'Write', 'NotebookEdit']);
   const ran = count(['Bash']);
-  const searched = count(['Grep', 'Glob', 'WebSearch', 'WebFetch']);
+  const searched = count(['Grep', 'Glob', 'WebSearch', 'WebFetch', 'mcp__companion__search_earlier_conversation']);
   const chats = count(['mcp__companion__start_new_chat']);
   // Looking up deferred tools is plumbing, not a step worth naming.
   const plumbing = count(['ToolSearch']);

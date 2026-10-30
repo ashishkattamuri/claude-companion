@@ -254,6 +254,25 @@ try {
   const hidden = childArgs[childArgs.indexOf('--append-system-prompt') + 1] ?? '';
   check('the earlier conversation is passed as hidden context', hidden.includes('echo: picking this back up') && childArgs.includes('--system-prompt-snapshot'));
   check('sessions get the new-chat tool', childArgs.includes('--mcp-config') && childArgs.includes('mcp__companion__start_new_chat'));
+  check('…and the earlier-conversation search, pre-approved', childArgs.includes('mcp__companion__search_earlier_conversation') && hidden.includes('search_earlier_conversation'));
+
+  // The new chat looks up a detail in the chat it came from, as Companion's MCP server asks.
+  const childSession = readdirSync(join(claudeDir, 'sessions'))
+    .map((f) => JSON.parse(readFileSync(join(claudeDir, 'sessions', f), 'utf8')))
+    .find((r) => r.jobId === childId)?.sessionId;
+  const ask = (sessionId, params) =>
+    new Promise((resolve) => {
+      const c = createConnection(join(root, 'app.sock'), () => c.write(`${JSON.stringify({ method: 'search_earlier', params: { claudePid: 1, sessionId, ...params } })}\n`));
+      let buf = '';
+      c.on('data', (d) => (buf += d));
+      c.on('end', () => resolve(JSON.parse(buf)));
+    });
+  const found = await ask(childSession, { query: 'typed in iTerm' });
+  check('a new chat can search the chat it came from', found.ok && found.message.includes('echo: typed in iTerm') && found.message.includes('the parent chat'));
+  const outline = await ask(childSession, {});
+  check('…or get an outline of it', outline.ok && /Turn \d+ · #\d+/.test(outline.message));
+  const refused = await ask(parentId, { query: 'anything' });
+  check('a chat not opened from another has nothing to search', !refused.ok && refused.error.includes('not opened from another chat'));
   await page.screenshot({ path: join(shots, '4-new-chat.png') });
 
   await page.locator('.from-link').click();

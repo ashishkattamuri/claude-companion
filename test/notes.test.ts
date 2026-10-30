@@ -95,6 +95,7 @@ describe('session notes', () => {
     expect(ctx).toContain('[USER] Now add metrics');
     expect(ctx).toContain('- /work/app/src/cache.ts');
     expect(ctx).toContain('do not recap it');
+    expect(ctx).toContain('search_earlier_conversation');
   });
 });
 
@@ -116,8 +117,9 @@ describe('new-chat tool', () => {
       await client.connect(clientSide);
 
       const { tools } = await client.listTools();
-      expect(tools.map((t) => t.name)).toEqual(['start_new_chat']);
+      expect(tools.map((t) => t.name)).toEqual(['start_new_chat', 'search_earlier_conversation']);
       expect(tools[0]!.description).toMatch(/separate/);
+      expect(tools[1]!.annotations?.readOnlyHint).toBe(true);
 
       const res = await client.callTool({ name: 'start_new_chat', arguments: { title: 'Testing strategy', prompt: 'Let us plan the tests.' } });
       expect(res.isError).toBe(false);
@@ -125,6 +127,10 @@ describe('new-chat tool', () => {
       expect(received).toEqual([
         { method: 'new_chat', params: { claudePid: 4242, sessionId: 'parent-session', title: 'Testing strategy', prompt: 'Let us plan the tests.' } },
       ]);
+
+      const found = await client.callTool({ name: 'search_earlier_conversation', arguments: { query: 'ECONNREFUSED', scope: 'lineage' } });
+      expect(found.isError).toBe(false);
+      expect(received[1]).toEqual({ method: 'search_earlier', params: { claudePid: 4242, sessionId: 'parent-session', query: 'ECONNREFUSED', scope: 'lineage' } });
       await client.close();
     } finally {
       server.close();

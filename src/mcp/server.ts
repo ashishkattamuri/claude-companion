@@ -10,7 +10,8 @@ import { sendRequest, socketPath } from './protocol.js';
 /**
  * Companion's MCP server, attached to the Claude sessions Companion starts. It gives Claude a tool
  * to open a new chat, so asking in plain words ("let's discuss this in a separate chat") works
- * from Companion and from any attached terminal alike.
+ * from Companion and from any attached terminal alike, and one to look up details in the
+ * conversation a chat was opened from.
  */
 export async function runMcpServer(cfg: Config): Promise<void> {
   const server = createMcpServer(cfg);
@@ -74,6 +75,35 @@ export function createMcpServer(cfg: Config, callerPid = process.ppid): McpServe
       const text = r.ok
         ? r.message
         : `Could not open the new chat: ${r.error} Tell the user, and suggest opening Companion and asking again.`;
+      return { content: [{ type: 'text', text }], isError: !r.ok };
+    },
+  );
+
+  server.registerTool(
+    'search_earlier_conversation',
+    {
+      title: 'Search the conversation this chat was opened from',
+      description:
+        'Only for a chat that was opened from an earlier Claude Code conversation (a new chat or a hand-off), which ' +
+        'you know from notes. When you need a detail the notes leave out (an exact error message, a command that ' +
+        'worked, numbers, why an option was ruled out, code that was proposed), look it up here instead of guessing ' +
+        'or asking the user. Returns matching messages, tool calls and full tool output, word for word, with step ' +
+        'numbers (#n). With no query, returns an outline of the earlier conversation to navigate from.',
+      inputSchema: {
+        query: z.string().optional().describe('Words or a regular expression to look for (case-insensitive)'),
+        around: z.number().int().positive().optional().describe('A step number (#n) from earlier results: read the steps around it in full'),
+        scope: z
+          .enum(['parent', 'lineage'])
+          .optional()
+          .describe('parent (default): the chat this one was opened from; lineage: that chat and the chats it was opened from in turn'),
+        chat: z.string().optional().describe('With around and lineage results: the chat id shown in results, to read in that chat'),
+        page: z.number().int().positive().optional().describe('Page of results, when a result says there are more'),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async (args) => {
+      const r = await sendRequest(socketPath(cfg), { method: 'search_earlier', params: { claudePid: callerPid, sessionId: sessionIdFor(cfg, callerPid), ...args } });
+      const text = r.ok ? r.message : `Could not search the earlier conversation: ${r.error}`;
       return { content: [{ type: 'text', text }], isError: !r.ok };
     },
   );

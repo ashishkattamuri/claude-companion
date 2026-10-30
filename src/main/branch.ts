@@ -20,6 +20,7 @@ export function branchContext(p: {
     'Below is what you know from it. Treat it as background knowledge you already have: do not recap it or mention these notes unless the user asks. Answer the user\'s message in this chat directly.',
     p.notes ? `<earlier_conversation_notes>\n${p.notes}\n</earlier_conversation_notes>` : '',
     p.recent ? `<most_recent_exchanges>\nThe last messages of that conversation, word for word (they may overlap the notes):\n${p.recent}\n</most_recent_exchanges>` : '',
+    'If you need a detail from the earlier conversation that these notes leave out (an exact error, a command, numbers, why something was ruled out), look it up with the search_earlier_conversation tool instead of guessing or asking the user. The notes stay your starting point; the tool is for details, not for re-reading everything.',
     p.pins.length
       ? `<pinned_files>\nThe user pinned these files as essential. Read them before relying on details about them:\n${p.pins.map((f) => `- ${f}`).join('\n')}\n</pinned_files>`
       : '',

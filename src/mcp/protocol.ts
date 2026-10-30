@@ -24,7 +24,24 @@ export interface HelloRequest {
   params: { claudePid: number; sessionId: string | null };
 }
 
-export type SocketRequest = NewChatRequest | HelloRequest;
+/** Claude looking up a detail in the conversation its chat was opened from. */
+export interface SearchEarlierRequest {
+  method: 'search_earlier';
+  params: {
+    claudePid: number;
+    sessionId: string | null;
+    query?: string;
+    /** A step number from earlier results: read the steps around it in full. */
+    around?: number;
+    /** `parent` (the chat this one was opened from) or `lineage` (its parents too). */
+    scope?: 'parent' | 'lineage';
+    /** Which earlier chat `around` reads; defaults to the nearest. */
+    chat?: string;
+    page?: number;
+  };
+}
+
+export type SocketRequest = NewChatRequest | HelloRequest | SearchEarlierRequest;
 export type SocketResponse = { ok: true; message: string } | { ok: false; error: string };
 
 export const socketPath = (cfg: Config) => process.env.COMPANION_SOCKET ?? join(dirname(cfg.dbPath), 'companion.sock');

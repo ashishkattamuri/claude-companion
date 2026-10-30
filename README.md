@@ -20,6 +20,7 @@ Companion branches it:
 
 - **A new linked session opens and starts working right away**, on an opening message Claude writes for that topic.
 - **It knows the earlier conversation as hidden background**: the parent's session notes plus its most recent exchanges. You never see that background in the new chat, so its thread stays clean, and it survives resumes.
+- **It can look up the rest.** When it needs a detail the notes left out (an exact error, the command that worked, a number), it searches the earlier conversation word for word, including full tool output, instead of guessing or asking you. It can only read the chats it came from.
 - **It stays linked.** Child chats nest under their parent in the sidebar. The parent lists every chat opened from it, and one click on "from …" takes you back.
 - **The parent becomes your decision log**: which path, what status, what's next.
 
