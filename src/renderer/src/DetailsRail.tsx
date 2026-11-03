@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react';
 import type { ConversationItem, SessionExtras, SessionState } from '../../shared/api';
+import { contextWindowFor } from '../../shared/contextWindow';
 import { api } from './api';
 import { timeAgo } from './format';
 import { describeTool } from './turns';
 
 type Tool = Extract<ConversationItem, { kind: 'tool' }>;
 
-/** Context window size: 1M for the long-context models, otherwise 200k. */
-const windowFor = (tokens: number) => (tokens > 200_000 ? 1_000_000 : 200_000);
 const k = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
 /** Suggest compacting or handing off from here. */
 const FULL_PCT = 70;
@@ -54,7 +53,8 @@ export function DetailsRail({ state, items, extras, onNavigate, onError }: Props
   const pinned = new Set(extras?.pins.map((p) => p.path) ?? []);
   const turns = items.filter((i) => i.kind === 'user').length;
   const ctx = facts.contextTokens;
-  const pct = ctx ? Math.min(100, Math.round((ctx / windowFor(ctx)) * 100)) : null;
+  const limit = contextWindowFor(facts.model, ctx ?? 0);
+  const pct = ctx ? Math.min(100, Math.round((ctx / limit) * 100)) : null;
 
   const act = async (label: string, fn: () => Promise<{ ok: boolean; error?: string } | void>) => {
     setBusy(label);
@@ -78,7 +78,7 @@ export function DetailsRail({ state, items, extras, onNavigate, onError }: Props
             <div className="rail-big">
               <span className="big">{pct}%</span>
               <span className="muted small tabular">
-                {k(ctx)} / {k(windowFor(ctx))} tokens
+                {k(ctx)} / {k(limit)} tokens
               </span>
             </div>
             <div className="meter">
