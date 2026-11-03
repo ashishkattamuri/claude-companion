@@ -7,7 +7,9 @@ import { describeTool } from './turns';
 
 type Tool = Extract<ConversationItem, { kind: 'tool' }>;
 
-const k = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+/** 1000000 → "1M", 52000 → "52k", 3300 → "3.3k", 607 → "607". */
+const k = (n: number) =>
+  n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : n >= 1e3 ? `${+(n / 1e3).toFixed(1)}k` : String(n);
 /** Suggest compacting or handing off from here. */
 const FULL_PCT = 70;
 

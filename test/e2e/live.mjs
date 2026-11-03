@@ -58,6 +58,13 @@ try {
   check("Claude's reply appears in the conversation", await until(async () => /\bREADY\b/.test(await page.locator('.a-text').last().innerText())));
   check('status becomes Ready', await until(async () => (await page.locator('.status-pill').innerText()).includes('Ready')));
   await shot('2-first-reply');
+  // The context window breaks down by what fills it, from Claude Code's own /context.
+  const legend = () => page.locator('.ctx-legend').innerText();
+  const messagesTokens = async () => (/Messages\s+([\d.]+k?)/.exec(await legend()) ?? [])[1] ?? null;
+  check('the context window shows what fills it, from /context', await until(async () => (await page.locator('.ctx-legend').count()) > 0 && (await legend()).includes('Messages'), 60000));
+  check('…with the autocompact buffer and free space, no deferred tools', /Autocompact buffer/.test(await legend()) && /Free space/.test(await legend()) && !/deferred/i.test(await legend()));
+  const firstMessages = await messagesTokens();
+  await page.locator('.rail').screenshot({ path: join(shots, 'live-2b-context-breakdown.png') });
 
   // 2. Drive it from the conversation view, through an approval.
   const composer = page.locator('.composer textarea');
@@ -73,6 +80,8 @@ try {
   check('message shows it came from Companion', await until(async () => (await thread()).includes('from Companion')));
   check('Claude finishes', await until(async () => (await page.locator('.status-pill').innerText()).includes('Ready')));
   await shot('4-after-approval');
+  check('the breakdown refreshes after the turn (messages grew)', await until(async () => { const m = await messagesTokens(); return m !== null && m !== firstMessages; }, 60000));
+  await page.locator('.rail').screenshot({ path: join(shots, 'live-4b-context-breakdown.png') });
 
   // 3. The terminal pane shows the same session.
   await page.getByRole('button', { name: 'Split', exact: true }).click();

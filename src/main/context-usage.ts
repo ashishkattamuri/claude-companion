@@ -42,8 +42,8 @@ export interface ContextUsageDeps {
 }
 
 /**
- * A session's context breakdown, from `claude -p /context --resume <id>`. That runs locally (no
- * model call) and with --no-session-persistence leaves the session's transcript untouched. One run
+ * A session's context breakdown, from `claude -p /context` on a fork of the session. That runs
+ * locally (no model call) and with --no-session-persistence writes no transcript at all. One run
  * per session at a time; a refresh asked for meanwhile runs once the current one finishes.
  */
 export class ContextUsage {
@@ -91,7 +91,8 @@ export class ContextUsage {
       try {
         proc = spawn(
           this.d.claudeBin,
-          ['-p', '/context', '--resume', sessionId, '--no-session-persistence', '--output-format', 'json'],
+          // A live background session can't be resumed elsewhere, but a fork of it can. Nothing is saved.
+          ['-p', '/context', '--resume', sessionId, '--fork-session', '--no-session-persistence', '--output-format', 'json'],
           { cwd, env: this.d.env(), stdio: ['ignore', 'pipe', 'ignore'] },
         );
       } catch {
