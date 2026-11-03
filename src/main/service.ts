@@ -50,6 +50,7 @@ import type {
 } from '../shared/api.js';
 import { findBackground, startBackground, stopBackground } from './background.js';
 import { branchContext } from './branch.js';
+import { ContextUsage } from './context-usage.js';
 import { SessionChannel, type ChannelDeps, type ChannelInfo } from './session.js';
 import { SideChats } from './side-chat.js';
 import { openInTerminalApp } from './terminal-app.js';
@@ -81,6 +82,8 @@ export interface ServiceDeps {
   notes?: boolean;
   /** Wait this long after a turn ends before updating the session's notes. */
   notesDelayMs?: number;
+  /** Read each session's `/context` breakdown after its turns end (runs `claude -p /context`, no model call). */
+  contextUsage?: boolean;
 }
 
 const ok: Result = { ok: true, value: undefined };
@@ -111,9 +114,16 @@ export class CompanionService {
   /** Audits in progress, by session. */
   private auditing = new Map<string, Promise<Result<AuditView>>>();
   private side: SideChats;
+  private context: ContextUsage | null = null;
 
   constructor(private d: ServiceDeps) {
     this.plugins = new PluginCli(d.claudeBin ?? process.env.COMPANION_CLAUDE_BIN ?? 'claude', d.env);
+    if (d.contextUsage)
+      this.context = new ContextUsage({
+        claudeBin: d.claudeBin ?? process.env.COMPANION_CLAUDE_BIN ?? 'claude',
+        env: d.env,
+        onChanged: () => d.onChanged?.(),
+      });
     this.side = new SideChats({
       db: d.db,
       projectsDir: d.cfg.projectsDir,
@@ -986,6 +996,7 @@ export class CompanionService {
       pins: this.pins(sessionId).map((path) => ({ path, label: this.display(sessionId, path) })),
       parent: parent ?? null,
       children,
+      context: this.context?.get(sessionId, this.cwdOf(sessionId)) ?? null,
     };
   }
 
@@ -1052,7 +1063,11 @@ export class CompanionService {
     ch.on('data', (data: string, end: number) => this.d.onData?.(sessionId, data, end));
     ch.on('sent', (itemId: string) => this.d.onSent?.(sessionId, itemId));
     ch.on('status', () => this.d.onChanged?.());
-    ch.on('turnEnded', () => this.scheduleNotes(sessionId));
+    ch.on('turnEnded', () => {
+      this.scheduleNotes(sessionId);
+      const cwd = this.cwdOf(sessionId);
+      if (cwd) this.context?.refresh(sessionId, cwd);
+    });
     ch.on('ended', () => {
       this.scheduleNotes(sessionId, 0);
       // The session just ended: index it and refresh its summary.

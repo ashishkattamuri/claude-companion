@@ -278,6 +278,10 @@ try {
   await page.locator('.from-link').click();
   check('the sidebar shows the new chat by its title', (await page.locator('.sessions').innerText()).includes('Brainstorm caching'));
   check('the original chat lists the new one', await until(async () => (await page.locator('.rail').innerText()).includes('Brainstorm caching')));
+  check('the context window shows what fills it, from /context', await until(async () => (await page.locator('.ctx-legend').count()) > 0 && (await page.locator('.ctx-legend').innerText()).includes('Messages')));
+  const legend = await page.locator('.ctx-legend').innerText();
+  check('…without deferred tools, with the autocompact buffer and free space', !/deferred/i.test(legend) && legend.includes('Autocompact buffer') && legend.includes('Free space'));
+  await page.locator('.rail').screenshot({ path: join(shots, '4b-context-breakdown.png') });
 
   // Context tools on the original chat: pin a file, compact with a focus, hand off.
   writeFileSync(join(project, 'notes.md'), 'design notes');

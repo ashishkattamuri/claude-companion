@@ -6,6 +6,7 @@
 //   fake -p --json-schema <schema> …     one structured answer (only the audit review's, for now)
 //   fake -p --resume <id> [--fork-session --session-id <new>] --output-format stream-json
 //                                        a side chat: answers in a fork of a session, never touching it
+//   fake -p /context --resume <id> …     the context breakdown report, shaped like Claude Code's
 // The daemon registers in <claude dir>/sessions/<pid>.json (kind "bg"), appends to the transcript,
 // and shows a numbered permission menu for prompts containing "needs-approval".
 import { spawn } from 'node:child_process';
@@ -36,6 +37,7 @@ else {
 
 // `claude -p` with a JSON schema: answers an audit review by flagging the first step it was shown.
 async function print(args, prompt) {
+  if (args[0] === '/context') return contextReport();
   if (args.includes('stream-json')) return sideAnswer(args, prompt);
   const schema = JSON.parse(args[args.indexOf('--json-schema') + 1] ?? '{}');
   const step = Number(/^#(\d+) /m.exec(prompt)?.[1] ?? 1);
@@ -281,7 +283,15 @@ function runDaemon([sessionId, ...args]) {
     reply(`echo: ${prompt}`);
   }
   function reply(text) {
-    record({ type: 'assistant', message: { role: 'assistant', model: 'claude-fake-1', content: [{ type: 'text', text }] } });
+    record({
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        model: 'claude-fake-1',
+        content: [{ type: 'text', text }],
+        usage: { input_tokens: 40, cache_read_input_tokens: 51_960, cache_creation_input_tokens: 0, output_tokens: 25 },
+      },
+    });
     out(`\n⏺ ${text}\n\n❯ `);
     status('idle');
   }
@@ -343,4 +353,29 @@ function runDaemon([sessionId, ...args]) {
     }, 300);
   }
   if (initialPrompt) void handle(initialPrompt);
+}
+
+// `claude -p /context --resume <id>`: Claude Code's context report (same Markdown shape), no model call.
+function contextReport() {
+  const result = [
+    '## Context Usage',
+    '',
+    '**Model:** claude-opus-5-5  ',
+    '**Tokens:** 52k / 1m (5%)',
+    '',
+    '### Estimated usage by category',
+    '',
+    '| Category | Tokens | Percentage |',
+    '|----------|--------|------------|',
+    '| System prompt | 3.3k | 0.3% |',
+    '| System tools | 12.1k | 1.2% |',
+    '| MCP tools | 4.2k | 0.4% |',
+    '| MCP tools (deferred) | 65.6k | 6.6% |',
+    '| Memory files | 2.1k | 0.2% |',
+    '| Skills | 7.3k | 0.7% |',
+    '| Messages | 23k | 2.3% |',
+    '| Free space | 915k | 91.5% |',
+    '| Autocompact buffer | 33k | 3.3% |',
+  ].join('\n');
+  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, num_turns: 0, result, total_cost_usd: 0 }));
 }

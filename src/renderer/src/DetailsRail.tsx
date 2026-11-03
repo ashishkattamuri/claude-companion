@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { ConversationItem, SessionExtras, SessionState } from '../../shared/api';
+import type { ContextBreakdown, ConversationItem, SessionExtras, SessionState } from '../../shared/api';
 import { contextWindowFor } from '../../shared/contextWindow';
 import { api } from './api';
 import { timeAgo } from './format';
@@ -10,6 +10,70 @@ type Tool = Extract<ConversationItem, { kind: 'tool' }>;
 const k = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
 /** Suggest compacting or handing off from here. */
 const FULL_PCT = 70;
+
+/** Each /context category keeps its own color slot, whatever else is present. Unknown ones share "other". */
+const SLOTS: Record<string, number> = {
+  Messages: 1,
+  'System prompt': 2,
+  'System tools': 3,
+  'MCP tools': 4,
+  'MCP server instructions': 5,
+  Skills: 6,
+  'Memory files': 7,
+  'Custom agents': 8,
+};
+
+/**
+ * The context window split by what fills it, from Claude Code's `/context` as of the last turn.
+ * The used part matches the headline count (the categories are /context's shares of it), then free
+ * space, then the buffer autocompact keeps clear at the end.
+ */
+function ContextBar({ breakdown, used, limit }: { breakdown: ContextBreakdown; used: number; limit: number }) {
+  const cats = breakdown.categories.filter((c) => c.tokens > 0);
+  const sum = cats.reduce((n, c) => n + c.tokens, 0) || 1;
+  const pctOf = (n: number) => (n / limit) * 100;
+  const usedPct = Math.min(100, pctOf(used));
+  const bufferPct = Math.min(100 - usedPct, pctOf(breakdown.autocompact));
+  const free = Math.max(0, limit - used - breakdown.autocompact);
+  const slot = (name: string) => (SLOTS[name] ? `s${SLOTS[name]}` : 'other');
+  return (
+    <>
+      <div className="ctx-bar" role="img" aria-label="Context window by category">
+        {cats.map((c) => (
+          <span
+            key={c.name}
+            className={`cseg ${slot(c.name)}`}
+            style={{ width: `${(usedPct * c.tokens) / sum}%` }}
+            title={`${c.name} · ${k(c.tokens)}`}
+          />
+        ))}
+        <span className="free" />
+        {bufferPct > 0 && <span className="cseg buffer" style={{ width: `${bufferPct}%` }} title={`Autocompact buffer · ${k(breakdown.autocompact)}`} />}
+      </div>
+      <ul className="ctx-legend">
+        {cats.map((c) => (
+          <li key={c.name}>
+            <i className={`cseg ${slot(c.name)}`} />
+            <span>{c.name}</span>
+            <span className="tabular">{k(c.tokens)}</span>
+          </li>
+        ))}
+        {breakdown.autocompact > 0 && (
+          <li>
+            <i className="cseg buffer" />
+            <span>Autocompact buffer</span>
+            <span className="tabular">{k(breakdown.autocompact)}</span>
+          </li>
+        )}
+        <li>
+          <i className="cseg free-key" />
+          <span>Free space</span>
+          <span className="tabular">{k(free)}</span>
+        </li>
+      </ul>
+    </>
+  );
+}
 
 /** A session's context tools and links. Refreshes whenever the main process reports a change. */
 export function useExtras(sessionId: string): SessionExtras | null {
@@ -81,9 +145,13 @@ export function DetailsRail({ state, items, extras, onNavigate, onError }: Props
                 {k(ctx)} / {k(limit)} tokens
               </span>
             </div>
-            <div className="meter">
-              <span className={pct! >= FULL_PCT ? 'hot' : ''} style={{ width: `${pct}%` }} />
-            </div>
+            {extras?.context ? (
+              <ContextBar breakdown={extras.context} used={ctx} limit={limit} />
+            ) : (
+              <div className="meter">
+                <span className={pct! >= FULL_PCT ? 'hot' : ''} style={{ width: `${pct}%` }} />
+              </div>
+            )}
             {pct! >= FULL_PCT && <p className="rail-warn">Getting full. Compact, or hand off to a fresh session.</p>}
           </>
         ) : (

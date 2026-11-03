@@ -102,6 +102,14 @@ export interface SessionExtras {
   parent: { id: string; title: string; kind: string } | null;
   /** Chats opened from this one. */
   children: { id: string; title: string; kind: string }[];
+  /** What fills the context window, from Claude Code's `/context`; null until first read. */
+  context: ContextBreakdown | null;
+}
+
+/** Claude Code's `/context` categories (tokens each), and the space kept free for autocompact. */
+export interface ContextBreakdown {
+  categories: { name: string; tokens: number }[];
+  autocompact: number;
 }
 
 /** Tokens and cost of one side-chat answer. `cached` is the chat's history read back from the prompt cache. */

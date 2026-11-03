@@ -36,6 +36,7 @@ app.whenReady().then(() => {
     env: () => sessionEnv(shellPath),
     analysis: !process.env.COMPANION_NO_ANALYSIS,
     notes: !process.env.COMPANION_NO_NOTES,
+    contextUsage: !process.env.COMPANION_NO_CONTEXT_USAGE,
     notesDelayMs: process.env.COMPANION_NOTES_DELAY_MS ? Number(process.env.COMPANION_NOTES_DELAY_MS) : undefined,
     // Companion's MCP server runs from the built CLI on Electron's Node, inside each session it starts.
     mcp: {
