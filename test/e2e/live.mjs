@@ -66,6 +66,22 @@ try {
   const firstMessages = await messagesTokens();
   await page.locator('.rail').screenshot({ path: join(shots, 'live-2b-context-breakdown.png') });
 
+  // Review: Claude writes and then edits a file; the review shows the net diff and explains it.
+  await page.locator('.composer textarea').fill('Use the Write tool to create plan.md with three short lines: a plan for adding retries to an HTTP client. Then use the Edit tool to add a fourth line about logging each retry. Do nothing else.');
+  await page.locator('.composer textarea').press('Enter');
+  const approveAny = async () => {
+    if ((await page.locator('.approval .actions button').count()) > 0) await page.locator('.approval .actions button').first().click();
+  };
+  check('the edited file shows in Files changed', await until(async () => (await approveAny(), (await page.locator('.rail').innerText()).includes('plan.md')), 120000));
+  check('…and Claude finishes', await until(async () => (await approveAny(), (await page.locator('.status-pill').innerText()).includes('Ready')), 120000));
+  await page.locator('.rail-h button', { hasText: 'Review' }).click();
+  const planCard = page.locator('.review-file', { hasText: 'plan.md' });
+  check('Review shows the file as one new file with all four lines', await until(async () => (await planCard.count()) === 1 && (await planCard.locator('tr.add').count()) >= 4));
+  check('…and a real explanation of it', await until(async () => ((await planCard.locator('.rf-explain').innerText().catch(() => '')).length > 40) && !(await planCard.locator('.rf-explain').innerText()).includes('Explaining'), 120000));
+  console.log(`  explanation: ${await planCard.locator('.rf-explain').innerText()}`);
+  await shot('2c-review');
+  await page.locator('.seg button', { hasText: 'Conversation' }).click();
+
   // 2. Drive it from the conversation view, through an approval.
   const composer = page.locator('.composer textarea');
   await composer.fill(`Use the Bash tool to run exactly: mkdir -p ${probeDir} && ls -d ${probeDir} . Do nothing else.`);

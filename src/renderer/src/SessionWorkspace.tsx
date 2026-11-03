@@ -4,12 +4,13 @@ import { AuditPanel, useAudit, wasteLabel } from './AuditPanel';
 import { Composer, shortModel } from './Composer';
 import { Conversation } from './Conversation';
 import { DetailsRail, useExtras } from './DetailsRail';
+import { ReviewPanel, useReview } from './ReviewPanel';
 import { SidePanel, useSideChats, type SideAnchor, type SideView } from './SidePanel';
 import { shortPath } from './format';
 import { useSession } from './store';
 import { TerminalView } from './TerminalView';
 
-export type View = 'conversation' | 'split' | 'terminal' | 'audit';
+export type View = 'conversation' | 'split' | 'terminal' | 'audit' | 'review';
 
 const STATUS: Record<string, { label: string; tone: string }> = {
   waiting: { label: 'Needs you', tone: 'amber' },
@@ -37,6 +38,7 @@ export function SessionWorkspace({
   const extras = useExtras(sessionId);
   const audit = useAudit(sessionId);
   const [mode, setMode] = useState<View>(initialView ?? 'conversation');
+  const review = useReview(sessionId, mode === 'review');
   const [focus, setFocus] = useState<{ id: string; at: number } | null>(null);
   const [rail, setRail] = useState(true);
   const sideChats = useSideChats(sessionId);
@@ -89,7 +91,7 @@ export function SessionWorkspace({
           </div>
           <div className="head-actions">
             <div className="seg" role="group" aria-label="View">
-              {(['conversation', 'split', 'terminal', 'audit'] as View[]).map((v) => (
+              {(['conversation', 'split', 'terminal', 'audit', 'review'] as View[]).map((v) => (
                 <button key={v} aria-pressed={mode === v} onClick={() => setMode(v)}>
                   {v[0]!.toUpperCase() + v.slice(1)}
                 </button>
@@ -140,8 +142,19 @@ export function SessionWorkspace({
             }}
           />
         )}
-        <div className={`panes ${mode}`} hidden={mode === 'audit'}>
-          {mode !== 'terminal' && mode !== 'audit' && (
+        {mode === 'review' && (
+          <ReviewPanel
+            sessionId={sessionId}
+            view={review.view}
+            onRetry={review.retry}
+            onJump={(id) => {
+              setMode('conversation');
+              setFocus({ id, at: Date.now() });
+            }}
+          />
+        )}
+        <div className={`panes ${mode}`} hidden={mode === 'audit' || mode === 'review'}>
+          {mode !== 'terminal' && mode !== 'audit' && mode !== 'review' && (
             <div className="convo-pane">
               <Conversation
                 items={items}
@@ -172,7 +185,9 @@ export function SessionWorkspace({
         </div>
       </section>
       {side && <SidePanel sessionId={sessionId} chats={sideChats} view={side} onView={setSide} onClose={() => setSide(null)} onError={onError} />}
-      {rail && !side && <DetailsRail state={state} items={items} extras={extras} onNavigate={onNavigate} onError={onError} />}
+      {rail && !side && (
+        <DetailsRail state={state} items={items} extras={extras} onNavigate={onNavigate} onError={onError} onReview={() => setMode('review')} />
+      )}
     </div>
   );
 }

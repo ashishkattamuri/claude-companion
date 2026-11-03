@@ -32,6 +32,8 @@ const api: CompanionApi = {
   unpinFile: (id, path) => ipcRenderer.invoke('session:unpin', id, path),
   reloadPins: (id) => ipcRenderer.invoke('session:reloadPins', id),
   openNotes: (id) => ipcRenderer.invoke('session:openNotes', id),
+  getReview: (id, explain) => ipcRenderer.invoke('session:review', id, explain === true),
+  openChangedFile: (id, path) => ipcRenderer.invoke('session:openChangedFile', id, path),
   refreshNotes: (id) => ipcRenderer.invoke('session:refreshNotes', id),
   getAudit: (id) => ipcRenderer.invoke('audit:get', id),
   runAudit: (id) => ipcRenderer.invoke('audit:run', id),

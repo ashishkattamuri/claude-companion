@@ -283,6 +283,31 @@ try {
   check('…without deferred tools, with the autocompact buffer and free space', !/deferred/i.test(legend) && legend.includes('Autocompact buffer') && legend.includes('Free space'));
   await page.locator('.rail').screenshot({ path: join(shots, '4b-context-breakdown.png') });
 
+  // Review the chat's changes like a PR: every file, its diff, and a short explanation of each.
+  const railText = () => page.locator('.rail').innerText();
+  check('Files changed has no Review link before any edits', (await page.locator('.rail-h button', { hasText: 'Review' }).count()) === 0);
+  await page.locator('.composer textarea').fill('please make-edits');
+  await page.locator('.composer textarea').press('Enter');
+  check('edited files show in Files changed', await until(async () => (await railText()).includes('src/retry.ts') && (await railText()).includes('README.md')));
+  await page.locator('.rail-h button', { hasText: 'Review' }).click();
+  const review = page.locator('.review-view');
+  check('Review lists every file the chat changed', await until(async () => (await review.locator('.review-file').count()) === 2));
+  const retryCard = review.locator('.review-file', { hasText: 'src/retry.ts' });
+  check("…with one net diff per file, across the chat's edits", (await retryCard.locator('.rn-new').count()) === 1 && (await retryCard.locator('tr.add').count()) === 8);
+  const readmeCard = review.locator('.review-file', { hasText: 'README.md' });
+  check('…numbered against the file before the chat changed it', (await readmeCard.locator('tr.del .code').innerText()).includes('A small demo.') && (await readmeCard.locator('tr.del .ln').first().innerText()) === '3');
+  check('…and a short explanation of each file', await until(async () => (await review.locator('.rf-explain').allInnerTexts()).filter((t) => t.startsWith('Explains')).length === 2));
+  check('…also in the file list', (await review.locator('.rn-gist').count()) === 2);
+  await page.screenshot({ path: join(shots, '4c-review.png') });
+  await readmeCard.locator('.rf-viewed input').check();
+  check('marking a file viewed folds it away', (await readmeCard.locator('.rf-diff').count()) === 0 && (await review.locator('.review-total').innerText()).includes('1 of 2 viewed'));
+  await readmeCard.locator('.rf-viewed input').uncheck();
+  await readmeCard.getByRole('button', { name: 'Show in chat' }).click();
+  check('Show in chat jumps to the step that made the change', await until(async () => (await page.locator('.convo-pane').count()) === 1 && (await page.locator('.review-view').count()) === 0));
+  await page.locator('.seg button', { hasText: 'Review' }).click();
+  check('reopening the review reuses the explanations, with no new model call', await until(async () => (await review.locator('.rf-explain').count()) === 2) && (await review.locator('.review-note').count()) === 0);
+  await page.locator('.seg button', { hasText: 'Conversation' }).click();
+
   // Context tools on the original chat: pin a file, compact with a focus, hand off.
   writeFileSync(join(project, 'notes.md'), 'design notes');
   await page.evaluate(([id, f]) => window.companion.pinFile(id, f), [parentId, join(project, 'notes.md')]);

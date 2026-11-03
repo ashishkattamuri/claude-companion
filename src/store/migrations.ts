@@ -215,4 +215,14 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX side_messages_chat ON side_messages(chat_id);
   `,
+  `
+  -- Review: a short explanation of each file a session changed, cached by the exact change.
+  CREATE TABLE review_explanations (
+    hash        TEXT PRIMARY KEY,  -- the file's path and net diff
+    path        TEXT NOT NULL,
+    text        TEXT NOT NULL,
+    model       TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+  );
+  `,
 ];

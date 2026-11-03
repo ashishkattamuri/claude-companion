@@ -99,9 +99,11 @@ interface Props {
   extras: SessionExtras | null;
   onNavigate: (sessionId: string) => void;
   onError: (message: string) => void;
+  /** Opens the review of the session's changes. */
+  onReview: () => void;
 }
 
-export function DetailsRail({ state, items, extras, onNavigate, onError }: Props) {
+export function DetailsRail({ state, items, extras, onNavigate, onError, onReview }: Props) {
   const { facts, sessionId } = state;
   const [focus, setFocus] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -249,7 +251,14 @@ export function DetailsRail({ state, items, extras, onNavigate, onError }: Props
       </section>
 
       <section>
-        <h2>Files changed</h2>
+        <div className="rail-h">
+          <h2>Files changed</h2>
+          {files.size > 0 && (
+            <button className="link" onClick={onReview} title="See every change, file by file, with a short explanation of each">
+              Review
+            </button>
+          )}
+        </div>
         {files.size === 0 && <p className="muted small">None yet.</p>}
         {[...files].map(([f, s]) => (
           <div key={f} className="file" title={f}>

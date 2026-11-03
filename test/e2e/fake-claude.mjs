@@ -7,9 +7,11 @@
 //   fake -p --resume <id> [--fork-session --session-id <new>] --output-format stream-json
 //                                        a side chat: answers in a fork of a session, never touching it
 //   fake -p /context --resume <id> …     the context breakdown report, shaped like Claude Code's
+// A prompt containing "make-edits" edits and writes files, recorded as Claude Code records them.
 // The daemon registers in <claude dir>/sessions/<pid>.json (kind "bg"), appends to the transcript,
 // and shows a numbered permission menu for prompts containing "needs-approval".
 import { spawn } from 'node:child_process';
+import { structuredPatch } from 'diff';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
@@ -51,6 +53,10 @@ async function print(args, prompt) {
       lean_calls: 1,
       notes: '',
     };
+  } else if (schema.properties?.files) {
+    // The review's explanations: one per <file path="…"> in the prompt.
+    const paths = [...prompt.matchAll(/<file path="([^"]+)"/g)].map((m) => m[1]);
+    out = { files: paths.map((path) => ({ path, explanation: `Explains ${path}: adds a retry helper so flaky calls are tried again.` })) };
   } else if (schema.properties?.top_fixes) {
     out = { summary: 'One avoidable lookup.', top_fixes: [{ fix: 'Pin src/webhook.ts', findings: ['N1'] }] };
   } else {
@@ -280,7 +286,38 @@ function runDaemon([sessionId, ...args]) {
       setTimeout(() => pending === id && status('waiting', 'permission prompt'), 1200);
       return;
     }
+    if (prompt.includes('make-edits')) return makeEdits();
     reply(`echo: ${prompt}`);
+  }
+  // Edits a file the project already has, writes a new one and edits it again, like Claude Code.
+  function makeEdits() {
+    const readme = join(cwd, 'README.md');
+    if (!existsSync(readme)) writeFileSync(readme, '# Demo app\n\nA small demo.\n\n## Usage\n\nRun it.\n');
+    record({ type: 'assistant', message: { role: 'assistant', model: 'claude-fake-1', content: [{ type: 'text', text: "I'll add a retry helper and mention it in the README." }] } });
+    const edit = (path, oldString, newString) => {
+      const originalFile = readFileSync(path, 'utf8');
+      const next = originalFile.replace(oldString, newString);
+      writeFileSync(path, next);
+      tool('Edit', { file_path: path, old_string: oldString, new_string: newString }, {
+        filePath: path, oldString, newString, originalFile, replaceAll: false, userModified: false,
+        structuredPatch: structuredPatch(path, path, originalFile, next, '', '', { context: 4 }).hunks,
+      });
+    };
+    const write = (path, content) => {
+      mkdirSync(join(path, '..'), { recursive: true });
+      writeFileSync(path, content);
+      tool('Write', { file_path: path, content }, { type: 'create', filePath: path, content, structuredPatch: [], originalFile: null });
+    };
+    const retry = join(cwd, 'src', 'retry.ts');
+    write(retry, 'export async function retry(fn) {\n  return fn();\n}\n');
+    edit(retry, '  return fn();', '  for (let i = 0; i < 3; i++) {\n    try {\n      return await fn();\n    } catch {}\n  }\n  return fn();');
+    edit(readme, 'A small demo.', 'A small demo, with retries for flaky calls.');
+    reply('Added src/retry.ts and mentioned it in the README.');
+  }
+  function tool(name, input, toolUseResult) {
+    const id = `toolu_${randomUUID().slice(0, 8)}`;
+    record({ type: 'assistant', message: { role: 'assistant', model: 'claude-fake-1', content: [{ type: 'tool_use', id, name, input }] } });
+    record({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }] }, toolUseResult });
   }
   function reply(text) {
     record({

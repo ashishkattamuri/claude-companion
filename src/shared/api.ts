@@ -106,6 +106,46 @@ export interface SessionExtras {
   context: ContextBreakdown | null;
 }
 
+/** One hunk of a unified diff: lines start with ' ' (context), '-' (removed) or '+' (added). */
+export interface ReviewHunk {
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: string[];
+}
+
+/** A file the session changed: its net diff over the whole session, and a short explanation. */
+export interface ReviewFile {
+  /** As Claude sees it from the session's folder: relative when inside the project. */
+  path: string;
+  abs: string;
+  isNew: boolean;
+  added: number;
+  removed: number;
+  hunks: ReviewHunk[];
+  /** Lines in the file before the session changed it (0 for a new file), for the trailing gap. */
+  oldLineCount: number;
+  /** Two or three sentences on what changed and why; null until written (or when it failed). */
+  explanation: string | null;
+  /** Whether the file on disk still matches what the session left: else someone changed it since. */
+  disk: 'same' | 'changed' | 'missing';
+  /** The file's earlier content wasn't recorded, so these are the session's edits one by one. */
+  partial: boolean;
+  /** The conversation steps that changed it, oldest first. */
+  stepIds: string[];
+  /** Identifies this exact change; explanations are cached by it. */
+  hash: string;
+}
+
+export interface ReviewView {
+  files: ReviewFile[];
+  /** Explanations are being written. */
+  explaining: boolean;
+  /** Why the last explanation run failed, if it did. */
+  error: string | null;
+}
+
 /** Claude Code's `/context` categories (tokens each), and the space kept free for autocompact. */
 export interface ContextBreakdown {
   categories: { name: string; tokens: number }[];
@@ -210,6 +250,10 @@ export interface CompanionApi {
   unpinFile(sessionId: string, path: string): Promise<void>;
   reloadPins(sessionId: string): Promise<Result>;
   openNotes(sessionId: string): Promise<void>;
+  /** What the session changed, file by file; `explain` also writes the missing explanations. */
+  getReview(sessionId: string, explain?: boolean): Promise<ReviewView>;
+  /** Opens a file the session changed in its default app. */
+  openChangedFile(sessionId: string, path: string): Promise<void>;
   refreshNotes(sessionId: string): Promise<void>;
   getAudit(sessionId: string): Promise<AuditState>;
   /**

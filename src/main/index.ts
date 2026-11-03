@@ -192,6 +192,11 @@ app.whenReady().then(() => {
   ipcMain.handle('session:unpin', (_e, id: string, path: string) => service.unpinFile(id, path));
   ipcMain.handle('session:reloadPins', (_e, id: string) => service.reloadPins(id));
   ipcMain.handle('session:refreshNotes', (_e, id: string) => service.refreshNotes(id));
+  ipcMain.handle('session:review', (_e, id: string, explain: boolean) => service.review(id, explain));
+  ipcMain.handle('session:openChangedFile', async (_e, id: string, path: string) => {
+    const file = service.reviewedFile(id, path);
+    if (file) await shell.openPath(file);
+  });
   ipcMain.handle('session:openNotes', async (_e, id: string) => {
     const path = service.notesPath(id);
     if (path) await shell.openPath(path);

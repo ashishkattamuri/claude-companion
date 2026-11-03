@@ -447,3 +447,59 @@ button.chip:hover:not(:disabled) { color: var(--ink); }
 .audit-pill.calm { background: var(--sunken); color: var(--muted); }
 .where.waste-high { background: var(--amber-soft); color: var(--amber); }
 .tool.focused { background: var(--accent-soft); border-radius: 8px; box-shadow: inset 2px 0 0 var(--accent); }
+
+/* Review: the session's changes, file by file, like a pull request. */
+.rail-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.rail-h h2 { margin-bottom: 8px; }
+.review-view { flex: 1; min-height: 0; display: grid; grid-template-columns: 260px minmax(0, 1fr); }
+.review-view:has(> .empty) { display: flex; }
+.review-nav { border-right: 1px solid var(--line); overflow-y: auto; padding: 16px 10px 24px; background: var(--raised); }
+.review-total { padding: 0 8px 12px; font-size: 13px; }
+.review-nav ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.review-nav li button { width: 100%; text-align: left; border: 0; background: none; border-radius: 8px; padding: 6px 8px; display: flex; flex-direction: column; gap: 1px; }
+.review-nav li button:hover { background: var(--sunken); }
+.review-nav li button.seen .rn-name { color: var(--muted); }
+.review-nav li button.seen .rn-name::before { content: '✓ '; color: var(--green); }
+.rn-path { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.rn-name { font: 500 12.5px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rn-stat { margin-left: auto; font-size: 11.5px; flex-shrink: 0; }
+.rn-dir { font: 11px var(--mono); color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.rn-gist { font-size: 12px; color: var(--muted); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 2px; }
+.rn-new { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--green); background: var(--green-soft); border-radius: 4px; padding: 0 5px; flex-shrink: 0; }
+.review-files { overflow-y: auto; padding: 16px 20px 40px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.review-note { margin: 0; }
+.review-note.warn { color: var(--amber); }
+.review-file { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); scroll-margin-top: 12px; overflow: hidden; flex-shrink: 0; }
+.rf-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--raised); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 1; flex-wrap: wrap; }
+.review-file.viewed .rf-head { border-bottom: 0; }
+.review-file.viewed .rf-path { color: var(--muted); }
+.rf-path { font-size: 12.5px; font-weight: 500; overflow-wrap: anywhere; }
+.rf-actions { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.rf-steps { color: var(--muted); display: inline-flex; gap: 6px; align-items: baseline; }
+.rf-viewed { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); cursor: pointer; }
+.rf-explain { margin: 0; padding: 10px 14px; line-height: 1.55; font-size: 13.5px; border-bottom: 1px solid var(--line); }
+.rf-notice { margin: 0; padding: 6px 14px; font-size: 12px; color: var(--amber); background: var(--amber-soft); border-bottom: 1px solid var(--line); }
+.rf-unfold { display: block; width: 100%; border: 0; background: var(--sunken); color: var(--accent); padding: 10px; font-size: 12.5px; }
+.rf-diff { width: 100%; border-collapse: collapse; font: 12px/1.6 var(--mono); table-layout: fixed; }
+.rf-diff td { padding: 0; vertical-align: top; }
+.rf-diff .ln { width: 44px; padding: 0 8px; text-align: right; color: var(--faint); user-select: none; font-variant-numeric: tabular-nums; }
+.rf-diff .code { white-space: pre-wrap; overflow-wrap: anywhere; padding-right: 12px; }
+.rf-diff .mark { display: inline-block; width: 16px; text-align: center; color: var(--faint); user-select: none; }
+.rf-diff tr.add { background: var(--add-bg); }
+.rf-diff tr.add .ln, .rf-diff tr.add .mark { color: var(--add); }
+.rf-diff tr.del { background: var(--del-bg); }
+.rf-diff tr.del .ln, .rf-diff tr.del .mark { color: var(--del); }
+.rf-diff tr.gap td { background: var(--sunken); color: var(--faint); font-size: 11.5px; padding: 3px 12px; }
+
+/* Syntax colours for the review's diffs (highlight.js classes). */
+.rf-diff { --sx-key: #8250df; --sx-str: #0a6b3d; --sx-num: #0550ae; --sx-com: #6e7781; --sx-fn: #953800; --sx-type: #0550ae; --sx-attr: #116329; }
+@media (prefers-color-scheme: dark) {
+  .rf-diff { --sx-key: #d2a8ff; --sx-str: #7ee2a8; --sx-num: #79c0ff; --sx-com: #8b949e; --sx-fn: #ffa657; --sx-type: #79c0ff; --sx-attr: #7ee787; }
+}
+.hljs-keyword, .hljs-selector-tag, .hljs-meta .hljs-keyword { color: var(--sx-key); }
+.hljs-string, .hljs-regexp, .hljs-template-string, .hljs-addition { color: var(--sx-str); }
+.hljs-number, .hljs-literal, .hljs-symbol { color: var(--sx-num); }
+.hljs-comment, .hljs-quote, .hljs-meta { color: var(--sx-com); font-style: italic; }
+.hljs-title, .hljs-title.function_, .hljs-section { color: var(--sx-fn); }
+.hljs-type, .hljs-built_in, .hljs-title.class_ { color: var(--sx-type); }
+.hljs-attr, .hljs-attribute, .hljs-property, .hljs-name, .hljs-selector-class { color: var(--sx-attr); }

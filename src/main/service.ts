@@ -1,6 +1,7 @@
 import { execFile, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative } from 'node:path';
+import { collectChanges, type FileChange } from '../adapter/changes.js';
 import type { ConversationItem } from '../adapter/conversation.js';
 import { detect } from '../analyze/audit/detectors.js';
 import { chunkTurns, review, reviewModel } from '../analyze/audit/review.js';
@@ -10,6 +11,7 @@ import { readEntries, searchEarlier, type EarlierChat } from '../analyze/earlier
 import type { LlmClient } from '../analyze/llm.js';
 import { notesBehind, notesPath, readNotes, recentExchanges, updateNotes } from '../analyze/notes.js';
 import { getRecap, recapDay, removeGoneSessionsFromRecaps, removeSessionsFromRecaps } from '../analyze/recap.js';
+import { cachedExplanations, explainChanges } from '../analyze/review.js';
 import { analysisNeeded, currentStatus, runJobs } from '../analyze/runner.js';
 import type { Config } from '../config.js';
 import {
@@ -41,6 +43,7 @@ import type {
   NewSessionRequest,
   RecapView,
   Result,
+  ReviewView,
   SessionExtras,
   SessionListItem,
   SessionSnapshot,
@@ -114,6 +117,11 @@ export class CompanionService {
   /** Audits in progress, by session. */
   private auditing = new Map<string, Promise<Result<AuditView>>>();
   private side: SideChats;
+  /** Each session's changes, kept until its transcript grows. */
+  private changes = new Map<string, { key: string; files: FileChange[] }>();
+  /** Explanations being written, and why the last attempt failed, by session. */
+  private explaining = new Map<string, Promise<void>>();
+  private explainErrors = new Map<string, string>();
   private context: ContextUsage | null = null;
 
   constructor(private d: ServiceDeps) {
@@ -978,6 +986,69 @@ export class CompanionService {
     this.d.onChanged?.();
   }
 
+  /**
+   * What the session changed, file by file: each file's net diff, whether it still matches the disk,
+   * and a short explanation. `explain` writes the missing explanations in the background (one small
+   * model call per batch of files); the view reports them as they arrive through onChanged.
+   */
+  review(sessionId: string, explain = false): ReviewView {
+    const files = this.sessionChanges(sessionId);
+    if (explain && files.length) this.explain(sessionId, files);
+    const known = cachedExplanations(this.d.db, files.map((f) => f.hash));
+    return {
+      files: files.map((f) => ({
+        path: this.display(sessionId, f.abs),
+        abs: f.abs,
+        isNew: f.isNew,
+        added: f.added,
+        removed: f.removed,
+        hunks: f.hunks,
+        oldLineCount: f.oldLineCount,
+        explanation: known.get(f.hash) ?? null,
+        disk: diskState(f),
+        partial: f.before === null,
+        stepIds: f.stepIds,
+        hash: f.hash,
+      })),
+      explaining: this.explaining.has(sessionId),
+      error: this.explainErrors.get(sessionId) ?? null,
+    };
+  }
+
+  /** Opens a file the session changed in the default app for it. */
+  reviewedFile(sessionId: string, abs: string): string | null {
+    return this.sessionChanges(sessionId).some((f) => f.abs === abs) && existsSync(abs) ? abs : null;
+  }
+
+  private sessionChanges(sessionId: string): FileChange[] {
+    const path = /^[\w-]+$/.test(sessionId) ? findTranscript(this.d.cfg.projectsDir, sessionId) : null;
+    if (!path) return [];
+    const st = statSync(path);
+    const key = `${path}:${st.size}:${st.mtimeMs}`;
+    const hit = this.changes.get(sessionId);
+    if (hit?.key === key) return hit.files;
+    const lines = readFileSync(path, 'utf8').split('\n').filter(Boolean);
+    const files = collectChanges(lines, readText);
+    this.changes.set(sessionId, { key, files });
+    return files;
+  }
+
+  private explain(sessionId: string, files: FileChange[]): void {
+    if (this.explaining.has(sessionId)) return;
+    const missing = new Set(files.map((f) => f.hash));
+    for (const h of cachedExplanations(this.d.db, [...missing]).keys()) missing.delete(h);
+    if (!missing.size) return;
+    this.explainErrors.delete(sessionId);
+    const p = explainChanges(this.d.db, this.d.cfg, this.d.llm, files.filter((f) => missing.has(f.hash)), (abs) => this.display(sessionId, abs))
+      .catch((err: Error) => void this.explainErrors.set(sessionId, err.message || 'Could not write the explanations.'))
+      .finally(() => {
+        this.explaining.delete(sessionId);
+        this.d.onChanged?.();
+      });
+    this.explaining.set(sessionId, p);
+    this.d.onChanged?.();
+  }
+
   extras(sessionId: string): SessionExtras {
     const notes = readNotes(this.d.db, sessionId);
     const parent = this.d.db
@@ -1111,4 +1182,19 @@ function placeholderRow(id: string, cwd: string | null, title: string): SessionR
     transcriptGone: false,
     summary: null,
   };
+}
+
+function readText(path: string): string | null {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+/** Whether a changed file is still as the session left it. Unknown (rebuilt edits) counts as the same. */
+function diskState(f: FileChange): 'same' | 'changed' | 'missing' {
+  const now = readText(f.abs);
+  if (now === null) return 'missing';
+  return f.after === null || now === f.after ? 'same' : 'changed';
 }
