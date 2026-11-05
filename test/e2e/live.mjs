@@ -144,7 +144,14 @@ try {
   // 6. Continue the ended session from the composer: it resumes as a background session.
   await composer.fill('Reply with exactly: CONTINUED');
   await composer.press('Enter');
-  check('sending to an ended session resumes it', await until(async () => (await page.locator('.a-text').last().innerText()).includes('CONTINUED')));
+  const continued = await until(async () => (await page.locator('.a-text').last().innerText()).includes('CONTINUED'), 60000);
+  check('sending to an ended session resumes it', continued);
+  if (!continued) {
+    await shot('7b-continue-failed');
+    const banner = page.locator('.attach-error');
+    console.log(`  status: ${await page.locator('.status-pill').innerText()}; attach error: ${(await banner.count()) ? await banner.innerText() : 'none'}`);
+    console.log(`  last reply: ${(await page.locator('.a-text').last().innerText()).slice(0, 200)}`);
+  }
   check('earlier messages are still there', (await thread()).includes('FROM-ITERM'));
   await page.getByRole('button', { name: 'End', exact: true }).click();
   await until(async () => (await page.locator('.status-pill').innerText()).includes('Not running'), 15000);
