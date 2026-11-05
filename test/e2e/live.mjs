@@ -160,6 +160,40 @@ try {
   } else {
     console.log('– no session running in another terminal; skipped the mirror checks');
   }
+
+  // 8. Ghost mode: a real chat that runs like any other, then leaves no trace when it ends.
+  {
+    const { execFileSync } = await import('node:child_process');
+    const sql = (q) => execFileSync('sqlite3', [sandbox.appEnv.COMPANION_DB, q], { encoding: 'utf8' }).trim();
+    const transcriptsOf = (id) => sandbox.transcriptDirs().flatMap((d) => (existsSync(join(d, `${id}.jsonl`)) ? [join(d, `${id}.jsonl`)] : []));
+    await app.evaluate(({ dialog }) => {
+      globalThis.ghostDialogs = [];
+      dialog.showMessageBox = async (_w, o) => (globalThis.ghostDialogs.push(o.message), { response: 0, checkboxChecked: false });
+    });
+    await page.keyboard.press('Meta+n');
+    await page.selectOption('#ns-project', project);
+    await page.selectOption('#ns-model', 'haiku');
+    await page.check('#ns-ghost');
+    await page.fill('#ns-prompt', 'Reply with exactly the word GHOSTLY and nothing else.');
+    await page.keyboard.press('Meta+Enter');
+    check('a ghost chat replies like any other', await until(async () => /\bGHOSTLY\b/.test(await page.locator('.a-text').last().innerText())));
+    check('…marked Ghost', (await page.locator('.ghost-pill').count()) === 1);
+    const ghostId = (await page.evaluate(() => window.companion.listSessions({}))).find((s) => s.ghost)?.id;
+    check('…with a transcript while it runs', !!ghostId && transcriptsOf(ghostId).length === 1);
+    await new Promise((r) => setTimeout(r, 6000)); // the tick that indexes transcripts
+    check('…never indexed', sql(`SELECT COUNT(*) FROM messages WHERE session_id = '${ghostId}'`) === '0' && sql(`SELECT COUNT(*) FROM sessions WHERE id = '${ghostId}'`) === '0');
+    await shot('9-ghost');
+    await page.getByRole('button', { name: 'End', exact: true }).click();
+    check('ending it asks first', await until(async () => (await app.evaluate(() => globalThis.ghostDialogs)).includes('Ending a ghost chat deletes it for good.'), 10000));
+    check('…then deletes its transcript', await until(async () => transcriptsOf(ghostId).length === 0 && !sandbox.transcriptDirs().some((d) => existsSync(join(d, ghostId))), 30000));
+    // Claude Code can write a last record after stopping; give it a moment, then look again.
+    await new Promise((r) => setTimeout(r, 8000));
+    await page.evaluate(() => window.companion.listSessions({}));
+    check('…and nothing comes back after it stops', transcriptsOf(ghostId).length === 0);
+    const left = ['sessions WHERE id', 'messages WHERE session_id', 'ingest_files WHERE session_id', 'session_notes WHERE session_id', 'deleted_sessions WHERE session_id', 'session_links WHERE child_id', 'side_chats WHERE session_id']
+      .map((t) => sql(`SELECT COUNT(*) FROM ${t} = '${ghostId}'`));
+    check("…and Companion's database keeps nothing about it", left.every((n) => n === '0'));
+  }
 } catch (err) {
   console.error(err);
   checks.push(['no exceptions', false]);
