@@ -86,6 +86,7 @@ export class SessionChannel extends EventEmitter {
       cwd: info.cwd,
       title: info.title,
       elsewhere: info.mirrorPid ? `pid ${info.mirrorPid}` : null,
+      attachError: null,
       jobId: info.jobId ?? null,
     };
     if (info.jobId) this.bg = findBackground(deps.claudeDir, info.jobId);
@@ -128,17 +129,30 @@ export class SessionChannel extends EventEmitter {
   }
 
   /** Attaches Companion's terminal pane: `claude attach <job>` in a pseudo-terminal. */
-  attach(): void {
-    if (this.attached || !this.bg) return;
-    const att: Attachment = {
-      jobId: this.bg.jobId,
-      pty: pty.spawn(this.deps.claudeBin, ['attach', this.bg.jobId], {
+  /**
+   * Connects Companion's terminal to the background session (`claude attach`). Returns whether it's
+   * attached. A failure to start the attach never throws: the session stays viewable from its
+   * transcript, and `attachError` says why, so the window can show it and offer to try again.
+   */
+  attach(): boolean {
+    if (this.attached) return true;
+    if (!this.bg) return false;
+    let proc: pty.IPty;
+    try {
+      proc = pty.spawn(this.deps.claudeBin, ['attach', this.bg.jobId], {
         name: 'xterm-256color',
         cols: COLS,
         rows: ROWS,
         cwd: this.state.cwd ?? process.cwd(),
         env: { ...this.deps.env(), TERM: 'xterm-256color', COLORTERM: 'truecolor' },
-      }),
+      });
+    } catch (err) {
+      this.update({ attachError: `Couldn't attach to this background chat: ${(err as Error).message || String(err)}` });
+      return false;
+    }
+    const att: Attachment = {
+      jobId: this.bg.jobId,
+      pty: proc,
       screen: new Screen(COLS, ROWS),
       buffer: '',
       written: 0,
@@ -153,14 +167,23 @@ export class SessionChannel extends EventEmitter {
       this.screenDirty = true;
       this.emit('data', chunk, att.written);
     });
-    att.pty.onExit(() => {
+    const started = Date.now();
+    att.pty.onExit(({ exitCode }) => {
       att.exited = true;
       att.screen.dispose();
       if (this.att !== att) return; // replaced by an attachment to another job
+      // `claude attach` failing straight away (missing binary, unknown job, version mismatch…): say why.
+      const failed = exitCode !== 0 && Date.now() - started < QUICK_EXIT_MS;
+      const why = failed ? lastLine(att.buffer) || `claude attach exited with code ${exitCode}` : null;
       // Detaching leaves a background session running; it just isn't attached here any more.
-      this.update({ mode: this.bg ? 'background' : 'history', prompt: null });
+      this.update({
+        mode: this.bg ? 'background' : 'history',
+        prompt: null,
+        ...(why ? { attachError: `Couldn't attach to this background chat: ${why}` } : {}),
+      });
     });
-    this.update({ mode: 'attached' });
+    this.update({ mode: 'attached', attachError: null });
+    return true;
   }
 
   /**
@@ -335,3 +358,13 @@ function readStatus(claudeDir: string, pid: number): string | null {
 
 const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
 const sameText = (a: string, b: string) => squash(a) === squash(b);
+
+/** An attach that ends with an error this soon after starting never really connected. */
+const QUICK_EXIT_MS = 5000;
+
+/** The last line of terminal output with its colours and cursor codes removed, for an error message. */
+function lastLine(output: string): string {
+  const plain = output.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*(\x07|\x1b\\)|\x1b[@-Z\\-_]/g, '');
+  const lines = plain.split(/\r?\n|\r/).map((l) => l.trim()).filter(Boolean);
+  return (lines.at(-1) ?? '').slice(0, 300);
+}

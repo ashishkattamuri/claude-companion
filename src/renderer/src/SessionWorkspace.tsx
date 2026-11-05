@@ -7,7 +7,7 @@ import { DetailsRail, useExtras } from './DetailsRail';
 import { ReviewPanel, useReview } from './ReviewPanel';
 import { SidePanel, useSideChats, type SideAnchor, type SideView } from './SidePanel';
 import { shortPath } from './format';
-import { useSession } from './store';
+import { sessions, useOpenError, useSession } from './store';
 import { TerminalView } from './TerminalView';
 
 export type View = 'conversation' | 'split' | 'terminal' | 'audit' | 'review';
@@ -35,6 +35,7 @@ export function SessionWorkspace({
   onNavigate: (sessionId: string) => void;
 }) {
   const view = useSession(sessionId);
+  const openError = useOpenError(sessionId);
   const extras = useExtras(sessionId);
   const audit = useAudit(sessionId);
   const [mode, setMode] = useState<View>(initialView ?? 'conversation');
@@ -45,7 +46,18 @@ export function SessionWorkspace({
   const [side, setSide] = useState<SideView | null>(null);
   const askSide = useCallback((anchor: SideAnchor) => setSide({ anchor }), []);
   const openSide = useCallback((chatId: string) => setSide({ chatId }), []);
-  if (!view) return <div className="loading">Loading session…</div>;
+  if (!view)
+    return openError ? (
+      <div className="empty">
+        <h2>Couldn't open this chat</h2>
+        <p className="muted">{openError}</p>
+        <button className="btn" onClick={() => void sessions.open(sessionId)}>
+          Try again
+        </button>
+      </div>
+    ) : (
+      <div className="loading">Loading session…</div>
+    );
   const { state, items } = view;
   const status = state.mode === 'mirror' ? { label: 'View only · plain terminal', tone: 'muted' } : STATUS[state.status]!;
   const running = state.mode === 'attached' || state.mode === 'background';
@@ -131,6 +143,14 @@ export function SessionWorkspace({
             )}
           </div>
         </header>
+        {state.attachError && (
+          <div className="attach-error" role="alert">
+            <span>{state.attachError} You can still read the conversation here.</span>
+            <button className="btn small" onClick={() => void sessions.open(sessionId)}>
+              Try again
+            </button>
+          </div>
+        )}
 
         {mode === 'audit' && (
           <AuditPanel

@@ -509,3 +509,6 @@ button.chip:hover:not(:disabled) { color: var(--ink); }
 .hljs-title, .hljs-title.function_, .hljs-section { color: var(--sx-fn); }
 .hljs-type, .hljs-built_in, .hljs-title.class_ { color: var(--sx-type); }
 .hljs-attr, .hljs-attribute, .hljs-property, .hljs-name, .hljs-selector-class { color: var(--sx-attr); }
+
+/* A background chat Companion couldn't attach to: still readable, with the reason and a retry. */
+.attach-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0; padding: 8px 20px; font-size: 13px; color: var(--amber); background: var(--amber-soft); border-bottom: 1px solid var(--line); }

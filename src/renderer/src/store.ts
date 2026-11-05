@@ -25,11 +25,29 @@ class SessionStore {
     api.onSentFromApp((id, itemId) => this.patch(id, (v) => ({ ...v, sentFromApp: new Set(v.sentFromApp).add(itemId) })));
   }
 
+  /** Why a session couldn't be opened, so the window can say so instead of loading forever. */
+  private failed = new Map<string, string>();
+
   async open(sessionId: string): Promise<string | null> {
-    const r = await api.openSession(sessionId);
-    if (!r.ok) return r.error;
-    this.load(sessionId, r.value);
-    return null;
+    let error: string;
+    try {
+      const r = await api.openSession(sessionId);
+      if (r.ok) {
+        this.failed.delete(sessionId);
+        this.load(sessionId, r.value);
+        return null;
+      }
+      error = r.error;
+    } catch (err) {
+      error = (err as Error).message || String(err);
+    }
+    this.failed.set(sessionId, error);
+    this.emit();
+    return error;
+  }
+
+  openError(sessionId: string | null): string | null {
+    return sessionId ? (this.failed.get(sessionId) ?? null) : null;
   }
 
   close(sessionId: string): void {
@@ -90,4 +108,10 @@ export const sessions = new SessionStore();
 export function useSession(sessionId: string | null): SessionView | undefined {
   useSyncExternalStore(sessions.subscribe, sessions.snapshotVersion);
   return sessions.get(sessionId);
+}
+
+/** Why the session couldn't be opened, if it couldn't. */
+export function useOpenError(sessionId: string | null): string | null {
+  useSyncExternalStore(sessions.subscribe, sessions.snapshotVersion);
+  return sessions.openError(sessionId);
 }

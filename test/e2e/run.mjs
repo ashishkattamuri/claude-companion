@@ -362,6 +362,23 @@ try {
   await audit.locator('.step-ref').first().click();
   check('a finding\'s step opens in the conversation, highlighted', await until(async () => (await page.locator('.tool.focused').count()) === 1));
 
+  // A background chat Companion can't attach to (its process is up but `claude attach` fails) still
+  // opens from its transcript, says why, and offers to try again: it never hangs on "Loading session…".
+  const STUCK = 'cccccccc-0000-0000-0000-00000000000c';
+  writeFileSync(
+    join(fixtureDir, `${STUCK}.jsonl`),
+    readFileSync(join(fixtureDir, `${SESSION}.jsonl`), 'utf8').replaceAll(SESSION, STUCK).replaceAll('Webhook retry logic', 'Stuck background chat'),
+  );
+  mkdirSync(join(claudeDir, 'sessions'), { recursive: true });
+  const stuckEntry = join(claudeDir, 'sessions', `${process.pid}.json`); // this test's own pid stands in for its process
+  writeFileSync(stuckEntry, JSON.stringify({ pid: process.pid, sessionId: STUCK, cwd: project, kind: 'bg', entrypoint: 'cli', jobId: 'cccccccc', status: 'idle', name: 'Stuck background chat' }));
+  check('a running background chat shows in the sidebar', await until(async () => (await row('Stuck background chat').count()) > 0, 30000));
+  await row('Stuck background chat').click();
+  check("…and opens even when Companion can't attach to it, readable from its transcript", await until(async () => (await page.locator('.thread .u-msg').count()) > 0, 15000));
+  check('…saying why, with a way to try again', await until(async () => (await page.locator('.attach-error').count()) === 1 && (await page.locator('.attach-error').innerText()).includes("No job matching 'cccccccc'")) && (await page.locator('.attach-error button', { hasText: 'Try again' }).count()) === 1);
+  await page.screenshot({ path: join(shots, '6c-attach-error.png') });
+  rmSync(stuckEntry, { force: true });
+
   // Connectors: Claude Code's /plugin as a page.
   await app.evaluate(({ dialog }) => {
     globalThis.dialogs = [];

@@ -64,6 +64,8 @@ export interface SessionState {
   elsewhere: string | null;
   /** Background sessions: the id for `claude attach <id>`. */
   jobId: string | null;
+  /** Why Companion couldn't attach to this background session, if the last try failed. */
+  attachError: string | null;
 }
 
 export interface SessionSnapshot {

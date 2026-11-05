@@ -564,7 +564,16 @@ export class CompanionService {
   }
 
   /** Starts showing a session. A background session is attached right away, so it can be driven. */
+  /** Never throws: the window shows the error instead of waiting for a session that won't come. */
   openSession(sessionId: string): Result<SessionSnapshot> {
+    try {
+      return this.openChannel(sessionId);
+    } catch (err) {
+      return { ok: false, error: `Couldn't open this chat: ${(err as Error).message || String(err)}` };
+    }
+  }
+
+  private openChannel(sessionId: string): Result<SessionSnapshot> {
     let ch = this.channels.get(sessionId);
     if (!ch) {
       const row = getSession(this.d.db, sessionId);
@@ -575,6 +584,7 @@ export class CompanionService {
       else if (live) Object.assign(info, { mode: 'mirror', mirrorPid: live.pid });
       ch = this.channel(sessionId, info);
     }
+    // A failed attach doesn't stop the chat opening: it shows from its transcript, with the reason.
     if (ch.state.mode === 'background') ch.attach();
     return { ok: true, value: ch.snapshot() };
   }
@@ -651,7 +661,7 @@ export class CompanionService {
     }
     // Continuing a hidden chat brings it back.
     if (this.d.db.prepare(`SELECT 1 FROM hidden_sessions WHERE session_id = ?`).get(sessionId)) this.setHidden([sessionId], false);
-    ch.attach();
+    if (!ch.attach() && ch.state.attachError) return { ok: false, error: ch.state.attachError };
     ch.send(text);
     return ok;
   }
