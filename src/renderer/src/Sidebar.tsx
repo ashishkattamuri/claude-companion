@@ -280,6 +280,7 @@ function Group({
             <span className="s-time">{s.status === 'busy' ? 'now' : timeAgo(s.lastTs, Date.now(), true)}</span>
             <span className="s-meta">
               <span className="proj">{s.project ?? '?'}</span>
+              {s.ghost && <span className="where ghost-mark" title="Ghost mode: deleted when it ends">ghost</span>}
               {s.live && !s.background && <span className="where" title="A plain claude in another terminal: view only">other terminal</span>}
               {s.status === 'waiting' && <span className="needs-label">needs you</span>}
               {s.transcriptGone && <span className="where">archived</span>}

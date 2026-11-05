@@ -89,6 +89,8 @@ export interface SessionListItem extends SessionRow {
   /** The latest audit: the share of the session's cost it found wasted. */
   audit: { share: number; reviewed: boolean } | null;
   auditing: boolean;
+  /** A ghost chat: deleted when it ends. */
+  ghost: boolean;
 }
 
 /** Context tools and links for one session. */
@@ -102,6 +104,8 @@ export interface SessionExtras {
   parent: { id: string; title: string; kind: string } | null;
   /** Chats opened from this one. */
   children: { id: string; title: string; kind: string }[];
+  /** A ghost chat: nothing about it is kept, and it's deleted when it ends. */
+  ghost: boolean;
   /** What fills the context window, from Claude Code's `/context`; null until first read. */
   context: ContextBreakdown | null;
   /** Files the session changed, with each file's net +/− over the session (the same as the review). */
@@ -214,6 +218,8 @@ export interface NewSessionRequest {
   permissionMode?: 'default' | 'acceptEdits' | 'plan';
   model?: string;
   worktree?: boolean;
+  /** Ghost mode: nothing about the chat is kept, and it's deleted when it ends. */
+  ghost?: boolean;
 }
 
 export type Result<T = void> = { ok: true; value: T } | { ok: false; error: string };

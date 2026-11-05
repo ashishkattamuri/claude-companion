@@ -225,4 +225,13 @@ export const MIGRATIONS: string[] = [
     created_at  TEXT NOT NULL
   );
   `,
+  `
+  -- Ghost chats: run like any other, but nothing about them is kept, and they're deleted when they
+  -- end. The row lives only until the chat is gone; ended_at marks one being cleaned up.
+  CREATE TABLE ghost_sessions (
+    session_id  TEXT PRIMARY KEY,
+    started_at  TEXT NOT NULL,
+    ended_at    TEXT
+  );
+  `,
 ];

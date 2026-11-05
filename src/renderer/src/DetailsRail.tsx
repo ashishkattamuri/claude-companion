@@ -196,7 +196,9 @@ export function DetailsRail({ state, items, extras, onNavigate, onError, onRevie
 
       <section>
         <h2>Session notes</h2>
-        {extras?.notes ? (
+        {extras?.ghost ? (
+          <p className="muted small">Ghost chats keep no notes.</p>
+        ) : extras?.notes ? (
           <>
             <p className="muted small">
               Updated {timeAgo(extras.notes.updatedAt)}

@@ -362,6 +362,41 @@ try {
   await audit.locator('.step-ref').first().click();
   check('a finding\'s step opens in the conversation, highlighted', await until(async () => (await page.locator('.tool.focused').count()) === 1));
 
+  // Ghost mode: a chat that runs like any other, then leaves no trace when it ends.
+  {
+    const { execFileSync } = await import('node:child_process');
+    const sql = (q) => execFileSync('sqlite3', [join(root, 'data', 'db.sqlite'), q], { encoding: 'utf8' }).trim();
+    const findTranscripts = (id) => readdirSync(join(claudeDir, 'projects')).flatMap((d) => (existsSync(join(claudeDir, 'projects', d, `${id}.jsonl`)) ? [join(claudeDir, 'projects', d, `${id}.jsonl`)] : []));
+    await app.evaluate(({ dialog }) => {
+      globalThis.ghostDialogs = [];
+      dialog.showMessageBox = async (_w, o) => (globalThis.ghostDialogs.push(o.message), { response: 0, checkboxChecked: false });
+    });
+    await page.keyboard.press('Meta+n');
+    await page.selectOption('#ns-project', project);
+    await page.check('#ns-ghost');
+    await page.fill('#ns-prompt', 'a private ghost-mode question');
+    await page.keyboard.press('Meta+Enter');
+    check('a ghost chat starts and replies like any other', await until(async () => (await thread()).includes('echo: a private ghost-mode question')));
+    check('…marked Ghost in the header', (await page.locator('.ghost-pill').count()) === 1);
+    check('…and on its sidebar row', await until(async () => (await page.locator('.s-row', { has: page.locator('.ghost-mark') }).count()) === 1));
+    const ghostId = readdirSync(join(claudeDir, 'fake-args'))
+      .map((f) => [f.replace(/\.json$/, ''), JSON.parse(readFileSync(join(claudeDir, 'fake-args', f), 'utf8'))])
+      .find(([, args]) => args.includes('a private ghost-mode question'))?.[0];
+    const ghostArgs = JSON.parse(readFileSync(join(claudeDir, 'fake-args', `${ghostId}.json`), 'utf8'));
+    check("…with Claude Code's auto-memory off", JSON.parse(ghostArgs[ghostArgs.indexOf('--settings') + 1] ?? '{}').env?.CLAUDE_CODE_DISABLE_AUTO_MEMORY === '1');
+    await new Promise((r) => setTimeout(r, 6000)); // the tick that indexes transcripts
+    check("…never indexed: search can't find it", (await page.evaluate(() => window.companion.listSessions({ search: 'ghost-mode question' }))).length === 0 && sql(`SELECT COUNT(*) FROM messages WHERE session_id = '${ghostId}'`) === '0');
+    await page.screenshot({ path: join(shots, '6c-ghost.png') });
+    const transcripts = findTranscripts(ghostId);
+    await page.getByRole('button', { name: 'End', exact: true }).click();
+    check('ending it asks first', await until(async () => (await app.evaluate(() => globalThis.ghostDialogs)).includes('Ending a ghost chat deletes it for good.')));
+    check('…then deletes its conversation', transcripts.length === 1 && (await until(async () => findTranscripts(ghostId).length === 0, 15000)));
+    check("…and it's gone from the sidebar", await until(async () => (await page.locator('.s-row', { hasText: 'a private ghost-mode question' }).count()) === 0));
+    const rows = ['sessions WHERE id', 'messages WHERE session_id', 'ingest_files WHERE session_id', 'session_notes WHERE session_id', 'deleted_sessions WHERE session_id', 'session_links WHERE child_id']
+      .map((t) => sql(`SELECT COUNT(*) FROM ${t} = '${ghostId}'`));
+    check('…and Companion keeps nothing about it', rows.every((n) => n === '0') && sql(`SELECT COUNT(*) FROM ghost_sessions WHERE session_id = '${ghostId}' AND ended_at IS NULL`) === '0');
+  }
+
   // Connectors: Claude Code's /plugin as a page.
   await app.evaluate(({ dialog }) => {
     globalThis.dialogs = [];

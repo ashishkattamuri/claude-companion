@@ -198,7 +198,7 @@ function runDaemon([sessionId, ...args]) {
   const job = sessionId.slice(0, 8);
   // Parse options the way the real CLI does: --allowedTools takes every value up to the next
   // option, so a prompt right after it is swallowed unless `--` ends the options.
-  const oneValue = new Set(['--model', '--permission-mode', '--resume', '--mcp-config', '--system-prompt-snapshot', '--append-system-prompt']);
+  const oneValue = new Set(['--model', '--permission-mode', '--resume', '--mcp-config', '--system-prompt-snapshot', '--append-system-prompt', '--settings']);
   let initialPrompt;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];

@@ -74,7 +74,20 @@ app.whenReady().then(() => {
   ipcMain.on('session:answer', (_e, id: string, key: string) => service.answer(id, key));
   ipcMain.on('session:interrupt', (_e, id: string) => service.interrupt(id));
   ipcMain.on('session:cycleMode', (_e, id: string) => service.cyclePermissionMode(id));
-  ipcMain.handle('session:stop', (_e, id: string) => service.stop(id));
+  ipcMain.handle('session:stop', async (_e, id: string) => {
+    if (service.isGhost(id)) {
+      const r = await dialog.showMessageBox(win!, {
+        type: 'warning',
+        message: 'Ending a ghost chat deletes it for good.',
+        detail: "Its conversation and everything Companion kept about it are deleted, and it can't be continued. Files Claude changed in your project stay.",
+        buttons: ['End and Delete', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+      });
+      if (r.response !== 0) return;
+    }
+    return service.stop(id);
+  });
   ipcMain.handle('session:openInTerminal', (_e, id: string) => service.openInTerminal(id));
   ipcMain.handle('session:setHidden', (_e, ids: string[], hidden: boolean) => service.setHidden(ids, hidden));
   ipcMain.handle('session:delete', async (_e, ids: string[]) => {

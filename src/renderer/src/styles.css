@@ -509,3 +509,9 @@ button.chip:hover:not(:disabled) { color: var(--ink); }
 .hljs-title, .hljs-title.function_, .hljs-section { color: var(--sx-fn); }
 .hljs-type, .hljs-built_in, .hljs-title.class_ { color: var(--sx-type); }
 .hljs-attr, .hljs-attribute, .hljs-property, .hljs-name, .hljs-selector-class { color: var(--sx-attr); }
+
+/* Ghost mode: a chat that leaves no trace when it ends. */
+.ghost-option { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.45; cursor: pointer; }
+.ghost-option input { margin-top: 3px; }
+.ghost-pill { background: var(--sunken); color: var(--ink); border: 1px dashed var(--faint); }
+.where.ghost-mark { border: 1px dashed var(--faint); color: var(--muted); }

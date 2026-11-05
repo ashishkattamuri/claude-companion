@@ -16,6 +16,7 @@ export function NewSessionSheet({ initial, onStart, onCancel }: Props) {
   const [permissionMode, setPermissionMode] = useState<NewSessionRequest['permissionMode']>('default');
   const [worktree, setWorktree] = useState(false);
   const [model, setModel] = useState('');
+  const [ghost, setGhost] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -28,7 +29,7 @@ export function NewSessionSheet({ initial, onStart, onCancel }: Props) {
 
   // A folder picked from disk that isn't a known project still needs to show in the list.
   const options = cwd && !projects.some((p) => p.cwd === cwd) ? [{ cwd, name: cwd.split('/').pop() ?? cwd }, ...projects] : projects;
-  const submit = () => cwd && onStart({ cwd, prompt, permissionMode, worktree, model: model || undefined });
+  const submit = () => cwd && onStart({ cwd, prompt, permissionMode, worktree, model: model || undefined, ghost: ghost || undefined });
 
   return (
     <div className="sheet-bg" onMouseDown={onCancel}>
@@ -93,6 +94,13 @@ export function NewSessionSheet({ initial, onStart, onCancel }: Props) {
             </select>
           </label>
         </div>
+        <label className="ghost-option" htmlFor="ns-ghost">
+          <input id="ns-ghost" type="checkbox" checked={ghost} onChange={(e) => setGhost(e.target.checked)} />
+          <span>
+            <b>Ghost mode</b>
+            <span className="muted"> · Leaves no trace when it ends: no history, notes, search or memory, and its conversation is deleted.</span>
+          </span>
+        </label>
         <label className="field" htmlFor="ns-prompt">
           What should Claude work on? (optional)
           <textarea id="ns-prompt" ref={promptRef} rows={5} value={prompt} onChange={(e) => setPrompt(e.target.value)} />

@@ -90,6 +90,13 @@ export interface ServiceDeps {
 }
 
 const ok: Result = { ok: true, value: undefined };
+/** Ghost chats: Claude Code writes no memories for them. */
+const GHOST_ENV = { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' };
+/** A ghost chat this new may not be in Claude Code's registry yet, so it isn't taken for ended. */
+const GHOST_GRACE_MS = 30_000;
+/** How long an ended ghost chat is remembered, to delete anything Claude Code writes after it stops. */
+const GHOST_LINGER_MS = 120_000;
+const GHOST_NO_AUDIT = "Ghost chats aren't audited: nothing about them is kept.";
 const NEW_CHAT_TOOL = 'mcp__companion__start_new_chat';
 const SEARCH_EARLIER_TOOL = 'mcp__companion__search_earlier_conversation';
 /** `claude mcp add` name for the user-scope registration. */
@@ -120,6 +127,9 @@ export class CompanionService {
   /** Each session's changes, kept until its transcript grows. */
   private changes = new Map<string, { key: string; files: FileChange[]; at: number }>();
   private changesRecheck = new Map<string, NodeJS.Timeout>();
+  /** Review explanations for ghost chats, which keep nothing on disk. */
+  private ghostExplanations = new Map<string, Map<string, string>>();
+  private endingGhosts = new Map<string, Promise<void>>();
   /** Explanations being written, and why the last attempt failed, by session. */
   private explaining = new Map<string, Promise<void>>();
   private explainErrors = new Map<string, string>();
@@ -145,6 +155,8 @@ export class CompanionService {
       mkdirSync(dirname(this.mcpConfigPath), { recursive: true });
       writeFileSync(this.mcpConfigPath, JSON.stringify({ mcpServers: { companion: d.mcp } }, null, 2));
     }
+    // Ghost chats that ended while Companion was closed are deleted now.
+    this.sweepGhosts();
   }
 
   /** Flags for every session Companion starts: its MCP server, with its tools pre-approved. */
@@ -162,11 +174,13 @@ export class CompanionService {
   }
 
   refresh(): void {
+    this.sweepGhosts();
     scan(this.d.db, this.d.cfg);
     removeGoneSessionsFromRecaps(this.d.db);
   }
 
   listSessions(query: { search?: string }): SessionListItem[] {
+    this.sweepGhosts();
     const live = new Map(this.d.loadLive().map((l) => [l.sessionId, l]));
     const rows = listSessions(this.d.db, { search: query.search });
     const items = rows.map((r) => this.listItem(r, live.get(r.id) ?? null));
@@ -191,6 +205,7 @@ export class CompanionService {
       ),
     );
     const hidden = this.idSet(`SELECT session_id AS id FROM hidden_sessions`);
+    const ghosts = this.idSet(`SELECT session_id AS id FROM ghost_sessions WHERE ended_at IS NULL`);
     const audits = new Map(
       (this.d.db.prepare(`SELECT session_id AS id, waste_share AS share, model FROM session_audits`).all() as { id: string; share: number; model: string | null }[]).map(
         (r) => [r.id, { share: r.share, reviewed: r.model !== null }],
@@ -201,15 +216,18 @@ export class CompanionService {
       s.hidden = hidden.has(s.id);
       s.audit = audits.get(s.id) ?? null;
       s.auditing = this.auditing.has(s.id);
+      s.ghost = ghosts.has(s.id);
     }
+    // A ghost chat that has ended is being deleted: it's gone from the list already.
+    const ended = this.idSet(`SELECT session_id AS id FROM ghost_sessions WHERE ended_at IS NOT NULL`);
     const rank = (s: SessionListItem) => (s.status === 'waiting' ? 3 : s.attached ? 2 : s.live ? 1 : 0);
-    return items.filter((s) => !superseded.has(s.id) || s.live).sort((a, b) => rank(b) - rank(a) || (b.lastTs ?? '').localeCompare(a.lastTs ?? ''));
+    return items.filter((s) => (!superseded.has(s.id) || s.live) && !ended.has(s.id)).sort((a, b) => rank(b) - rank(a) || (b.lastTs ?? '').localeCompare(a.lastTs ?? ''));
   }
 
   private listItem(row: SessionRow, live: LiveSession | null): SessionListItem {
     const ch = this.channels.get(row.id);
     const status = ch?.alive ? ch.state.status : live ? (live.status === 'busy' ? 'busy' : live.status === 'waiting' ? 'waiting' : 'idle') : null;
-    return { ...row, live, background: live?.kind === 'bg', attached: !!ch?.attached, status, parentId: null, hidden: false, audit: null, auditing: false };
+    return { ...row, live, background: live?.kind === 'bg', attached: !!ch?.attached, status, parentId: null, hidden: false, audit: null, auditing: false, ghost: false };
   }
 
   private idSet(sql: string, ...params: unknown[]): Set<string> {
@@ -275,9 +293,23 @@ export class CompanionService {
     for (const id of ids) {
       const jobId = this.channels.get(id)?.state.jobId ?? live.find((x) => x.sessionId === id)?.jobId;
       if (jobId) await stopBackground(this.channelDeps, jobId);
+    }
+    this.purge(ids, { tombstone: true });
+    return ok;
+  }
+
+  /**
+   * Deletes everything about these chats: their transcripts (and the folders beside them), notes,
+   * side chats, and every row Companion keeps about them. `tombstone` records them as deleted so a
+   * transcript that comes back isn't listed again; ghost chats keep no such record.
+   */
+  private purge(ids: string[], { tombstone }: { tombstone: boolean }): void {
+    for (const id of ids) {
       this.dropChannel(id);
       clearTimeout(this.notesTimers.get(id));
       this.notesTimers.delete(id);
+      this.changes.delete(id);
+      this.ghostExplanations.delete(id);
     }
 
     for (const id of ids) {
@@ -297,7 +329,7 @@ export class CompanionService {
     const now = new Date().toISOString();
     this.d.db.transaction(() => {
       for (const id of ids) {
-        this.d.db.prepare(`INSERT OR REPLACE INTO deleted_sessions(session_id, deleted_at) VALUES (?, ?)`).run(id, now);
+        if (tombstone) this.d.db.prepare(`INSERT OR REPLACE INTO deleted_sessions(session_id, deleted_at) VALUES (?, ?)`).run(id, now);
         // Messages, summaries and notes go with the session row.
         this.d.db.prepare(`DELETE FROM sessions WHERE id = ?`).run(id);
         this.d.db.prepare(`DELETE FROM ingest_files WHERE session_id = ?`).run(id);
@@ -310,7 +342,62 @@ export class CompanionService {
       removeSessionsFromRecaps(this.d.db, ids);
     })();
     this.d.onChanged?.();
-    return ok;
+  }
+
+  // ── Ghost chats ──────────────────────────────────────────────────────────────────────────────
+
+  /** A ghost chat: nothing about it is kept, and it's deleted when it ends. */
+  isGhost(sessionId: string): boolean {
+    return !!this.d.db.prepare(`SELECT 1 FROM ghost_sessions WHERE session_id = ?`).get(sessionId);
+  }
+
+  /**
+   * A ghost chat ended (End, or it exited): delete it. Its files in the project are the user's work
+   * and stay; everything else about it goes. The row stays a little longer, marked ended, so the
+   * transcript isn't indexed if Claude Code writes a last record after stopping (see sweepGhosts).
+   */
+  private endGhost(sessionId: string): Promise<void> {
+    const running = this.endingGhosts.get(sessionId);
+    if (running) return running;
+    const p = (async () => {
+      this.d.db.prepare(`UPDATE ghost_sessions SET ended_at = ? WHERE session_id = ? AND ended_at IS NULL`).run(new Date().toISOString(), sessionId);
+      const jobId = this.channels.get(sessionId)?.state.jobId ?? this.d.loadLive().find((l) => l.sessionId === sessionId && l.kind === 'bg')?.jobId;
+      if (jobId) await stopBackground(this.channelDeps, jobId);
+      this.purge([sessionId], { tombstone: false });
+    })().finally(() => this.endingGhosts.delete(sessionId));
+    this.endingGhosts.set(sessionId, p);
+    return p;
+  }
+
+  /**
+   * Ghost chats that ended while nobody was watching (or while Companion was closed) are deleted;
+   * anything Claude Code writes after one stops is deleted too, and once nothing is left the chat
+   * is forgotten altogether.
+   */
+  private sweepGhosts(): void {
+    const rows = this.d.db.prepare(`SELECT session_id AS id, started_at AS started, ended_at AS ended FROM ghost_sessions`).all() as {
+      id: string;
+      started: string;
+      ended: string | null;
+    }[];
+    if (!rows.length) return;
+    const live = new Set(this.d.loadLive().map((l) => l.sessionId));
+    const now = Date.now();
+    for (const r of rows) {
+      if (this.endingGhosts.has(r.id)) continue;
+      if (!r.ended) {
+        // Just started: Claude Code may not have registered it yet.
+        if (live.has(r.id) || this.channels.get(r.id)?.alive || now - Date.parse(r.started) < GHOST_GRACE_MS) continue;
+        void this.endGhost(r.id);
+        continue;
+      }
+      if (this.transcriptsOf(r.id).length) this.purge([r.id], { tombstone: false });
+      else if (now - Date.parse(r.ended) > GHOST_LINGER_MS) this.d.db.prepare(`DELETE FROM ghost_sessions WHERE session_id = ?`).run(r.id);
+    }
+  }
+
+  private transcriptsOf(sessionId: string): string[] {
+    return listTranscripts(this.d.cfg.projectsDir).main.filter((p) => basename(p, '.jsonl') === sessionId);
   }
 
   /** The older copies a chat was restarted from (see restartWithTools). */
@@ -342,6 +429,7 @@ export class CompanionService {
 
   /** What an audit would read and who reviews it, for the confirmation. */
   auditEstimate(sessionId: string): Result<{ calls: number; steps: number; tokens: number; parts: number; model: string }> {
+    if (this.isGhost(sessionId)) return { ok: false, error: GHOST_NO_AUDIT };
     const path = this.transcriptOf(sessionId);
     if (!path) return { ok: false, error: 'This chat has no transcript to audit.' };
     const tl = loadTimeline(path);
@@ -377,6 +465,7 @@ export class CompanionService {
     const running = this.auditing.get(sessionId);
     if (running) return running;
     const run = (async (): Promise<Result<AuditView>> => {
+      if (this.isGhost(sessionId)) return { ok: false, error: GHOST_NO_AUDIT };
       const path = this.transcriptOf(sessionId);
       if (!path) return { ok: false, error: 'This chat has no transcript to audit.' };
       this.refresh();
@@ -606,14 +695,24 @@ export class CompanionService {
     // "Ask before edits": newer Claude Code calls it `manual` and otherwise starts in Auto mode.
     else if (this.hasManualMode()) args.push('--permission-mode', 'manual');
     if (req.worktree) args.push('--worktree');
+    // Ghost mode: Claude writes no memories. Background chats run in Claude Code's daemon, so say it
+    // in the session's own settings as well as in the environment of the command that starts it.
+    if (req.ghost) args.push('--settings', JSON.stringify({ env: GHOST_ENV }));
     // `--` ends the options: --allowedTools takes several values and --worktree an optional one,
     // so a prompt right after them would be swallowed as a tool or worktree name.
     if (prompt) args.push('--', prompt);
     let entry;
     try {
-      entry = await startBackground(this.channelDeps, req.cwd, args);
+      const deps = req.ghost ? { ...this.channelDeps, env: () => ({ ...this.channelDeps.env(), ...GHOST_ENV }) } : this.channelDeps;
+      entry = await startBackground(deps, req.cwd, args);
     } catch (err) {
       return { ok: false, error: `Could not start claude: ${(err as Error).message}` };
+    }
+    if (req.ghost) {
+      this.d.db.prepare(`INSERT OR REPLACE INTO ghost_sessions(session_id, started_at, ended_at) VALUES (?, ?, NULL)`).run(entry.sessionId, new Date().toISOString());
+      // In case it was indexed while starting.
+      this.d.db.prepare(`DELETE FROM sessions WHERE id = ?`).run(entry.sessionId);
+      this.d.db.prepare(`DELETE FROM ingest_files WHERE session_id = ?`).run(entry.sessionId);
     }
     const ch = this.channel(entry.sessionId, {
       cwd: req.cwd,
@@ -707,7 +806,9 @@ export class CompanionService {
     this.channels.get(sessionId)?.cyclePermissionMode();
   }
 
+  /** Stops a background chat. A ghost chat is deleted once stopped. */
   async stop(sessionId: string): Promise<void> {
+    if (this.isGhost(sessionId)) return this.endGhost(sessionId);
     const jobId = this.channels.get(sessionId)?.state.jobId;
     if (jobId) await stopBackground(this.channelDeps, jobId);
   }
@@ -883,6 +984,7 @@ export class CompanionService {
   }
 
   private async doRestart(sessionId: string): Promise<Result<string>> {
+    if (this.isGhost(sessionId)) return { ok: false, error: "Ghost chats can't be restarted: stopping one deletes it." };
     const ch = this.channels.get(sessionId);
     const cwd = this.cwdOf(sessionId);
     if (ch?.state.mode === 'mirror') return { ok: false, error: 'This chat runs in another terminal; restart it there.' };
@@ -1010,6 +1112,7 @@ export class CompanionService {
     const files = this.sessionChanges(sessionId);
     if (explain && files.length) this.explain(sessionId, files);
     const known = cachedExplanations(this.d.db, files.map((f) => f.hash));
+    for (const [hash, text] of this.ghostExplanations.get(sessionId) ?? []) known.set(hash, text);
     return {
       files: files.map((f) => ({
         path: this.display(sessionId, f.abs),
@@ -1070,9 +1173,13 @@ export class CompanionService {
     if (this.explaining.has(sessionId)) return;
     const missing = new Set(files.map((f) => f.hash));
     for (const h of cachedExplanations(this.d.db, [...missing]).keys()) missing.delete(h);
+    // Ghost chats keep their explanations in memory only, for as long as the chat runs.
+    let memory = this.ghostExplanations.get(sessionId);
+    if (!memory && this.isGhost(sessionId)) this.ghostExplanations.set(sessionId, (memory = new Map()));
+    for (const h of memory?.keys() ?? []) missing.delete(h);
     if (!missing.size) return;
     this.explainErrors.delete(sessionId);
-    const p = explainChanges(this.d.db, this.d.cfg, this.d.llm, files.filter((f) => missing.has(f.hash)), (abs) => this.display(sessionId, abs))
+    const p = explainChanges(this.d.db, this.d.cfg, this.d.llm, files.filter((f) => missing.has(f.hash)), (abs) => this.display(sessionId, abs), { memory })
       .catch((err: Error) => void this.explainErrors.set(sessionId, err.message || 'Could not write the explanations.'))
       .finally(() => {
         this.explaining.delete(sessionId);
@@ -1102,6 +1209,7 @@ export class CompanionService {
       children,
       context: this.context?.get(sessionId, this.cwdOf(sessionId)) ?? null,
       changes: this.sessionChanges(sessionId, 2000).map((f) => ({ path: this.display(sessionId, f.abs), abs: f.abs, added: f.added, removed: f.removed })),
+      ghost: this.isGhost(sessionId),
     };
   }
 
@@ -1131,7 +1239,7 @@ export class CompanionService {
 
   /** Notes are updated once a turn has ended and the session has been quiet for a moment. */
   private scheduleNotes(sessionId: string, delayMs = this.d.notesDelayMs ?? 45_000): void {
-    if (this.d.notes === false) return;
+    if (this.d.notes === false || this.isGhost(sessionId)) return;
     clearTimeout(this.notesTimers.get(sessionId));
     this.notesTimers.set(
       sessionId,
@@ -1145,6 +1253,7 @@ export class CompanionService {
   }
 
   private runNotes(sessionId: string): Promise<void> {
+    if (this.isGhost(sessionId)) return Promise.resolve(); // ghost chats keep no notes
     const running = this.notesRunning.get(sessionId);
     if (running) return running;
     const p = (async () => {
@@ -1174,6 +1283,8 @@ export class CompanionService {
       if (cwd) this.context?.refresh(sessionId, cwd);
     });
     ch.on('ended', () => {
+      // A ghost chat that ends is deleted, not indexed or summarised.
+      if (this.isGhost(sessionId)) return void this.endGhost(sessionId);
       this.scheduleNotes(sessionId, 0);
       // The session just ended: index it and refresh its summary.
       this.refresh();

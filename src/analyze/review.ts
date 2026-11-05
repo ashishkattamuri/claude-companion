@@ -40,11 +40,13 @@ export async function explainChanges(
   llm: LlmClient,
   files: FileChange[],
   display: (abs: string) => string,
-  opts: { batchChars?: number } = {},
+  /** `memory`: keep the explanations there instead of the database (ghost chats keep nothing). */
+  opts: { batchChars?: number; memory?: Map<string, string> } = {},
 ): Promise<void> {
   const known = cachedExplanations(db, files.map((f) => f.hash));
-  const todo = files.filter((f) => !known.has(f.hash));
-  const save = db.prepare(`INSERT OR REPLACE INTO review_explanations(hash, path, text, model, created_at) VALUES (?, ?, ?, ?, ?)`);
+  const todo = files.filter((f) => !known.has(f.hash) && !opts.memory?.has(f.hash));
+  const insert = db.prepare(`INSERT OR REPLACE INTO review_explanations(hash, path, text, model, created_at) VALUES (?, ?, ?, ?, ?)`);
+  const save = { run: (hash: string, path: string, text: string, model: string, at: string) => (opts.memory ? opts.memory.set(hash, text) : insert.run(hash, path, text, model, at)) };
 
   for (const batch of batches(todo, display, opts.batchChars ?? 40_000)) {
     const out = await llm.complete({

@@ -63,6 +63,11 @@ export function SessionWorkspace({
             <div className="head-title">
               <h1>{state.title}</h1>
               <span className={`status-pill ${status.tone}`}>● {status.label}</span>
+              {extras?.ghost && (
+                <span className="status-pill ghost-pill" title="Ghost mode: nothing about this chat is kept, and it's deleted when it ends">
+                  Ghost
+                </span>
+              )}
               {audit.state?.audit && (
                 <button
                   className={`status-pill audit-pill ${audit.state.audit.wasted.share >= 0.15 ? '' : 'calm'}`}
