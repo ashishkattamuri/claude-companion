@@ -28,6 +28,9 @@ export function readLiveSessions(claudeDir: string): LiveSession[] {
     .flatMap((f) => {
       try {
         const j = JSON.parse(readFileSync(join(dir, f), 'utf8'));
+        // `claude -p` and SDK runs register too (entrypoint "sdk-cli"), including Companion's own
+        // background calls such as the /context read. They have no terminal to show, so leave them out.
+        if (j.entrypoint === 'sdk-cli') return [];
         return typeof j.pid === 'number' && typeof j.sessionId === 'string' ? [j] : [];
       } catch {
         return [];

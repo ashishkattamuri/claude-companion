@@ -69,8 +69,11 @@ try {
   // Review: Claude writes and then edits a file; the review shows the net diff and explains it.
   await page.locator('.composer textarea').fill('Use the Write tool to create plan.md with three short lines: a plan for adding retries to an HTTP client. Then use the Edit tool to add a fourth line about logging each retry. Do nothing else.');
   await page.locator('.composer textarea').press('Enter');
+  // Ask before edits: approve each edit once, then wait for its card to go, so no second click lands as typed text.
   const approveAny = async () => {
-    if ((await page.locator('.approval .actions button').count()) > 0) await page.locator('.approval .actions button').first().click();
+    if ((await page.locator('.approval .actions button').count()) === 0) return;
+    await page.locator('.approval .actions button').first().click();
+    await until(async () => (await page.locator('.approval').count()) === 0, 15000);
   };
   check('the edited file shows in Files changed', await until(async () => (await approveAny(), (await page.locator('.rail').innerText()).includes('plan.md')), 120000));
   check('…and Claude finishes', await until(async () => (await approveAny(), (await page.locator('.status-pill').innerText()).includes('Ready')), 120000));
@@ -102,7 +105,8 @@ try {
   // 3. The terminal pane shows the same session.
   await page.getByRole('button', { name: 'Split', exact: true }).click();
   const termText = () => page.locator('.term-pane .xterm-rows').innerText();
-  check('terminal pane shows the same conversation', await until(async () => (await termText()).includes('READY')));
+  // The latest turn is what's on screen; earlier ones have scrolled up.
+  check('terminal pane shows the same conversation', await until(async () => (await termText()).includes('probe-dir')));
   await shot('5-split');
 
   // 4. A second terminal (iTerm's role) attaches with `claude attach` and drives the same session.
@@ -117,7 +121,7 @@ try {
     for (let i = 0; i < screen.rows; i++) out += `${b.getLine(b.viewportY + i)?.translateToString(true) ?? ''}\n`;
     return out;
   };
-  check('second terminal attaches and sees the session', await until(async () => itermText().includes('READY'), 20000));
+  check('second terminal attaches and sees the session', await until(async () => itermText().includes('probe-dir'), 20000));
   iterm.write('\x1b[200~Reply with exactly: FROM-ITERM\x1b[201~');
   await new Promise((r) => setTimeout(r, 300));
   iterm.write('\r');
