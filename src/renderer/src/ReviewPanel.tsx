@@ -188,24 +188,6 @@ const FileCard = memo(function FileCard({
           <Stat added={f.added} removed={f.removed} />
         </span>
         <span className="rf-actions">
-          {f.stepIds.length > 0 && (
-            <span className="rf-steps small">
-              {f.stepIds.length === 1 ? (
-                <button className="link" onClick={() => onJump(f.stepIds[0]!)}>
-                  Show in chat
-                </button>
-              ) : (
-                <>
-                  In chat:{' '}
-                  {f.stepIds.map((id, i) => (
-                    <button key={id} className="link" onClick={() => onJump(id)} title={`Edit ${i + 1} of ${f.stepIds.length}`}>
-                      {i + 1}
-                    </button>
-                  ))}
-                </>
-              )}
-            </span>
-          )}
           {f.disk !== 'missing' && (
             <button className="btn small" onClick={onOpen}>
               Open
@@ -223,6 +205,7 @@ const FileCard = memo(function FileCard({
           ) : explaining ? (
             <p className="rf-explain muted">Explaining this change…</p>
           ) : null}
+          <Steps file={f} onJump={onJump} />
           {f.disk === 'changed' && <p className="rf-notice">Changed on disk since this session edited it. The diff shows the session's changes only.</p>}
           {f.disk === 'missing' && <p className="rf-notice">This file no longer exists on disk.</p>}
           {f.partial && <p className="rf-notice">The file's earlier content wasn't recorded, so these are the session's edits one by one.</p>}
@@ -243,19 +226,20 @@ function Diff({ file: f }: { file: ReviewFile }) {
   const lang = LANG[f.path.split('.').pop()?.toLowerCase() ?? ''];
   const rows = useMemo(() => diffRows(f), [f]);
   return (
+    <div className="rf-diff-wrap">
     <table className="rf-diff">
       <tbody>
         {rows.map((r, i) =>
           r.kind === 'gap' ? (
             <tr key={i} className="gap">
-              <td colSpan={3}>⋯ {r.count === null ? 'unchanged lines' : `${r.count} unchanged ${r.count === 1 ? 'line' : 'lines'}`}</td>
+              <td colSpan={4}>⋯ {r.count === null ? 'unchanged lines' : `${r.count} unchanged ${r.count === 1 ? 'line' : 'lines'}`}</td>
             </tr>
           ) : (
             <tr key={i} className={r.kind}>
               <td className="ln">{r.old ?? ''}</td>
               <td className="ln">{r.new ?? ''}</td>
+              <td className="mark">{r.kind === 'add' ? '+' : r.kind === 'del' ? '−' : ''}</td>
               <td className="code">
-                <span className="mark">{r.kind === 'add' ? '+' : r.kind === 'del' ? '−' : ' '}</span>
                 <Code text={r.text} lang={lang} />
               </td>
             </tr>
@@ -263,8 +247,39 @@ function Diff({ file: f }: { file: ReviewFile }) {
         )}
       </tbody>
     </table>
+    </div>
   );
 }
+
+/**
+ * The edits that made this change, each with what Claude said just before it, in its own words (free:
+ * it's already in the transcript). A remark that covers several edits in a row is shown once.
+ */
+function Steps({ file: f, onJump }: { file: ReviewFile; onJump: (itemId: string) => void }) {
+  if (!f.stepIds.length) return null;
+  const many = f.stepIds.length > 1;
+  return (
+    <ol className="rf-steps">
+      {f.stepIds.map((id, i) => {
+        const note = f.stepNotes[i] ?? null;
+        const repeat = i > 0 && note !== null && note === f.stepNotes[i - 1];
+        return (
+          <li key={id}>
+            {many && <span className="rf-step-n tabular">{i + 1}</span>}
+            <span className={`rf-step-note ${note && !repeat ? '' : 'muted'}`} title={note ?? undefined}>
+              {repeat ? 'Same as above' : note ? `“${clip(firstSentence(note), 180)}”` : 'Edited without a remark'}
+            </span>
+            <button className="link" onClick={() => onJump(id)}>
+              Show in chat
+            </button>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 function Stat({ added, removed }: { added: number; removed: number }) {
   return (

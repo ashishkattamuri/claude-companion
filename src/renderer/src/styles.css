@@ -475,16 +475,22 @@ button.chip:hover:not(:disabled) { color: var(--ink); }
 .review-file.viewed .rf-path { color: var(--muted); }
 .rf-path { font-size: 12.5px; font-weight: 500; overflow-wrap: anywhere; }
 .rf-actions { margin-left: auto; display: flex; align-items: center; gap: 12px; }
-.rf-steps { color: var(--muted); display: inline-flex; gap: 6px; align-items: baseline; }
+.rf-steps { list-style: none; margin: 0; padding: 6px 14px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
+.rf-steps li { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.rf-step-n { flex-shrink: 0; width: 16px; height: 16px; border-radius: 50%; background: var(--sunken); color: var(--muted); font-size: 10.5px; display: inline-grid; place-items: center; align-self: center; }
+.rf-step-note { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rf-steps .link { flex-shrink: 0; font-size: 12px; }
 .rf-viewed { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); cursor: pointer; }
 .rf-explain { margin: 0; padding: 10px 14px; line-height: 1.55; font-size: 13.5px; border-bottom: 1px solid var(--line); }
 .rf-notice { margin: 0; padding: 6px 14px; font-size: 12px; color: var(--amber); background: var(--amber-soft); border-bottom: 1px solid var(--line); }
 .rf-unfold { display: block; width: 100%; border: 0; background: var(--sunken); color: var(--accent); padding: 10px; font-size: 12.5px; }
-.rf-diff { width: 100%; border-collapse: collapse; font: 12px/1.6 var(--mono); table-layout: fixed; }
+/* Code keeps its exact indentation: no wrapping, the +/− marker in its own column, long lines scroll. */
+.rf-diff-wrap { overflow-x: auto; }
+.rf-diff { min-width: 100%; border-collapse: collapse; font: 12px/1.6 var(--mono); }
 .rf-diff td { padding: 0; vertical-align: top; }
-.rf-diff .ln { width: 44px; padding: 0 8px; text-align: right; color: var(--faint); user-select: none; font-variant-numeric: tabular-nums; }
-.rf-diff .code { white-space: pre-wrap; overflow-wrap: anywhere; padding-right: 12px; }
-.rf-diff .mark { display: inline-block; width: 16px; text-align: center; color: var(--faint); user-select: none; }
+.rf-diff .ln { width: 1%; min-width: 36px; padding: 0 8px; text-align: right; color: var(--faint); user-select: none; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rf-diff .mark { width: 1%; min-width: 18px; padding: 0 2px 0 4px; text-align: center; color: var(--faint); user-select: none; }
+.rf-diff .code { white-space: pre; padding-right: 16px; tab-size: 4; }
 .rf-diff tr.add { background: var(--add-bg); }
 .rf-diff tr.add .ln, .rf-diff tr.add .mark { color: var(--add); }
 .rf-diff tr.del { background: var(--del-bg); }

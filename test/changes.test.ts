@@ -44,6 +44,7 @@ describe('collectChanges', () => {
     expect(retry).toMatchObject({ abs: '/p/retry.ts', isNew: false, before: ORIGINAL, after: v2, added: 2, removed: 2, stepIds: [e1, e2] });
     expect(retry!.requests).toEqual(['Add backoff to retry and raise the limit']);
     expect(retry!.remarks).toEqual(['I will add exponential backoff.']);
+    expect(retry!.stepNotes).toEqual(['I will add exponential backoff.', 'I will add exponential backoff.']);
     expect(retry!.hunks.flatMap((h) => h.lines)).toEqual(expect.arrayContaining(['-  return fn();', '+  return withBackoff(fn);', '-export const LIMIT = 3;', '+export const LIMIT = 5;']));
     expect(backoff).toMatchObject({ abs: '/p/backoff.ts', isNew: true, before: '', added: 1, removed: 0, oldLineCount: 0, stepIds: [w] });
   });

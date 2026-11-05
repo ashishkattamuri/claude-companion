@@ -298,6 +298,10 @@ try {
   check('…numbered against the file before the chat changed it', (await readmeCard.locator('tr.del .code').innerText()).includes('A small demo.') && (await readmeCard.locator('tr.del .ln').first().innerText()) === '3');
   check('…and a short explanation of each file', await until(async () => (await review.locator('.rf-explain').allInnerTexts()).filter((t) => t.startsWith('Explains')).length === 2));
   check('…also in the file list', (await review.locator('.rn-gist').count()) === 2);
+  check("each edit shows what Claude said before it, at no cost", (await retryCard.locator('.rf-steps li').count()) === 2 && (await retryCard.locator('.rf-steps li').first().innerText()).includes("I'll add a retry helper"));
+  check('…said once for edits it covers in a row', (await retryCard.locator('.rf-steps li').nth(1).innerText()).includes('Same as above'));
+  check('the +/− marker sits in its own column, so code keeps its indentation', (await retryCard.locator('tr.add td.mark').first().innerText()) === '+' && (await retryCard.locator('tr.add td.code').nth(1).innerText()).startsWith('  for (let i'));
+  check("the rail's counts are the file's net change, as in the review", /src\/retry\.ts\s*\+8(?!\d)/.test(await railText()));
   await page.screenshot({ path: join(shots, '4c-review.png') });
   await readmeCard.locator('.rf-viewed input').check();
   check('marking a file viewed folds it away', (await readmeCard.locator('.rf-diff').count()) === 0 && (await review.locator('.review-total').innerText()).includes('1 of 2 viewed'));

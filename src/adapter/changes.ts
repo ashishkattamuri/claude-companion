@@ -19,6 +19,8 @@ export interface FileChange {
   removed: number;
   oldLineCount: number;
   stepIds: string[];
+  /** What Claude said just before each of those steps (null when it said nothing), at no extra cost. */
+  stepNotes: (string | null)[];
   /** The messages that asked for these edits, and what Claude said while making them: the "why". */
   requests: string[];
   remarks: string[];
@@ -32,6 +34,7 @@ const CONTEXT_LINES = 3;
 interface Pending {
   name: string;
   itemId: string;
+  note: string | null;
   path: string | null;
 }
 
@@ -47,6 +50,7 @@ interface Acc {
   /** Each edit in order, to undo them from the file on disk when the content before wasn't recorded. */
   ops: Op[];
   stepIds: string[];
+  stepNotes: (string | null)[];
   requests: string[];
   remarks: string[];
 }
@@ -78,7 +82,7 @@ export function collectChanges(lines: string[], readFile?: (abs: string) => stri
         const itemId = content.length > 1 ? `${rec.uuid}:${i}` : rec.uuid;
         if (block?.type === 'text' && typeof block.text === 'string' && block.text.trim()) remarks = [...remarks, block.text.trim()].slice(-3);
         else if (block?.type === 'tool_use' && EDIT_TOOLS.has(block.name))
-          pending.set(block.id, { name: block.name, itemId, path: typeof block.input?.file_path === 'string' ? block.input.file_path : null });
+          pending.set(block.id, { name: block.name, itemId, note: remarks.at(-1) ?? null, path: typeof block.input?.file_path === 'string' ? block.input.file_path : null });
       });
       continue;
     }
@@ -119,10 +123,11 @@ function apply(files: Map<string, Acc>, abs: string, call: Pending, r: Record<st
   const created = call.name === 'Write' && (r.type === 'create' || (original === null && typeof r.content === 'string'));
   let acc = files.get(abs);
   if (!acc) {
-    acc = { abs, isNew: created, before: created ? '' : original, after: created ? '' : original, edits: [], ops: [], stepIds: [], requests: [], remarks: [] };
+    acc = { abs, isNew: created, before: created ? '' : original, after: created ? '' : original, edits: [], ops: [], stepIds: [], stepNotes: [], requests: [], remarks: [] };
     files.set(abs, acc);
   }
   acc.stepIds.push(call.itemId);
+  acc.stepNotes.push(call.note);
   const hunks = toHunks(r.structuredPatch);
   acc.edits.push(...hunks);
   const replace = typeof r.oldString === 'string' && typeof r.newString === 'string';
@@ -200,6 +205,7 @@ function finish(acc: Acc): FileChange {
     removed,
     oldLineCount,
     stepIds: acc.stepIds,
+    stepNotes: acc.stepNotes,
     requests: acc.requests,
     remarks: acc.remarks,
     hash,

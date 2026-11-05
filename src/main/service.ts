@@ -118,7 +118,8 @@ export class CompanionService {
   private auditing = new Map<string, Promise<Result<AuditView>>>();
   private side: SideChats;
   /** Each session's changes, kept until its transcript grows. */
-  private changes = new Map<string, { key: string; files: FileChange[] }>();
+  private changes = new Map<string, { key: string; files: FileChange[]; at: number }>();
+  private changesRecheck = new Map<string, NodeJS.Timeout>();
   /** Explanations being written, and why the last attempt failed, by session. */
   private explaining = new Map<string, Promise<void>>();
   private explainErrors = new Map<string, string>();
@@ -584,12 +585,26 @@ export class CompanionService {
     if (ch && !ch.attached) this.dropChannel(sessionId);
   }
 
+  private manualMode: boolean | null = null;
+
+  /** Whether the installed Claude Code has the `manual` permission mode (checked once, from `--help`). */
+  private hasManualMode(): boolean {
+    if (this.manualMode === null) {
+      const bin = this.d.claudeBin ?? process.env.COMPANION_CLAUDE_BIN ?? 'claude';
+      const r = spawnSync(bin, ['--help'], { env: this.d.env(), encoding: 'utf8', timeout: 10_000 });
+      this.manualMode = /--permission-mode[\s\S]{0,400}"manual"/.test(`${r.stdout ?? ''}`);
+    }
+    return this.manualMode;
+  }
+
   async newSession(req: NewSessionRequest): Promise<Result<string>> {
     if (!existsSync(req.cwd)) return { ok: false, error: `Folder not found: ${req.cwd}` };
     const prompt = req.prompt?.trim();
     const args: string[] = this.launchArgs();
     if (req.model) args.push('--model', req.model);
     if (req.permissionMode && req.permissionMode !== 'default') args.push('--permission-mode', req.permissionMode);
+    // "Ask before edits": newer Claude Code calls it `manual` and otherwise starts in Auto mode.
+    else if (this.hasManualMode()) args.push('--permission-mode', 'manual');
     if (req.worktree) args.push('--worktree');
     // `--` ends the options: --allowedTools takes several values and --worktree an optional one,
     // so a prompt right after them would be swallowed as a tool or worktree name.
@@ -1008,6 +1023,7 @@ export class CompanionService {
         disk: diskState(f),
         partial: f.before === null,
         stepIds: f.stepIds,
+        stepNotes: f.stepNotes,
         hash: f.hash,
       })),
       explaining: this.explaining.has(sessionId),
@@ -1020,16 +1036,33 @@ export class CompanionService {
     return this.sessionChanges(sessionId).some((f) => f.abs === abs) && existsSync(abs) ? abs : null;
   }
 
-  private sessionChanges(sessionId: string): FileChange[] {
+  /**
+   * The session's changes, re-read when its transcript has grown. `maxStaleMs` lets a caller that asks
+   * often (the rail, on every update while Claude works) reuse a recent read instead of re-reading.
+   */
+  private sessionChanges(sessionId: string, maxStaleMs = 0): FileChange[] {
+    const hit = this.changes.get(sessionId);
+    const age = hit ? Date.now() - hit.at : Infinity;
+    if (hit && age < maxStaleMs) {
+      // Reusing a recent read: check again once the window has passed, so the last edit still shows.
+      if (!this.changesRecheck.has(sessionId))
+        this.changesRecheck.set(
+          sessionId,
+          setTimeout(() => {
+            this.changesRecheck.delete(sessionId);
+            this.d.onChanged?.();
+          }, maxStaleMs - age + 50),
+        );
+      return hit.files;
+    }
     const path = /^[\w-]+$/.test(sessionId) ? findTranscript(this.d.cfg.projectsDir, sessionId) : null;
     if (!path) return [];
     const st = statSync(path);
     const key = `${path}:${st.size}:${st.mtimeMs}`;
-    const hit = this.changes.get(sessionId);
     if (hit?.key === key) return hit.files;
     const lines = readFileSync(path, 'utf8').split('\n').filter(Boolean);
     const files = collectChanges(lines, readText);
-    this.changes.set(sessionId, { key, files });
+    this.changes.set(sessionId, { key, files, at: Date.now() });
     return files;
   }
 
@@ -1068,6 +1101,7 @@ export class CompanionService {
       parent: parent ?? null,
       children,
       context: this.context?.get(sessionId, this.cwdOf(sessionId)) ?? null,
+      changes: this.sessionChanges(sessionId, 2000).map((f) => ({ path: this.display(sessionId, f.abs), abs: f.abs, added: f.added, removed: f.removed })),
     };
   }
 

@@ -110,8 +110,10 @@ export function DetailsRail({ state, items, extras, onNavigate, onError, onRevie
   const [showNotes, setShowNotes] = useState(false);
   const canAct = state.mode !== 'mirror';
 
+  // Each file's net change over the session, as the review shows it; until that arrives, the edits summed.
   const files = new Map<string, { added: number; removed: number; abs: string }>();
-  for (const it of items) {
+  if (extras) for (const c of extras.changes) files.set(c.path, { added: c.added, removed: c.removed, abs: c.abs });
+  else for (const it of items) {
     if (it.kind !== 'tool' || !['Edit', 'MultiEdit', 'Write'].includes(it.name) || it.result?.isError) continue;
     const d = describeTool(it as Tool, state.cwd);
     if (!d.file) continue;

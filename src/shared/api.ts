@@ -104,6 +104,8 @@ export interface SessionExtras {
   children: { id: string; title: string; kind: string }[];
   /** What fills the context window, from Claude Code's `/context`; null until first read. */
   context: ContextBreakdown | null;
+  /** Files the session changed, with each file's net +/− over the session (the same as the review). */
+  changes: { path: string; abs: string; added: number; removed: number }[];
 }
 
 /** One hunk of a unified diff: lines start with ' ' (context), '-' (removed) or '+' (added). */
@@ -134,6 +136,8 @@ export interface ReviewFile {
   partial: boolean;
   /** The conversation steps that changed it, oldest first. */
   stepIds: string[];
+  /** What Claude said just before each of those steps, in its own words; null when it said nothing. */
+  stepNotes: (string | null)[];
   /** Identifies this exact change; explanations are cached by it. */
   hash: string;
 }
