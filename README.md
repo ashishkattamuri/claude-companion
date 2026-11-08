@@ -4,9 +4,9 @@
 
 Companion for Claude is an open-source desktop app around Claude Code. It keeps every Claude Code session in one window, shows what each session is carrying in its context, and gives you the tools to keep that context focused: notes, hand-offs, linked sub-sessions and side threads. Around that core it adds what a developer needs day to day (sessions grouped by what they need from you, a morning recap) and the building blocks for engineering workflows (reviewing a session's changes like a pull request, approvals, connectors).
 
-[![Watch the demo: Companion for Claude](docs/media/demo-cover.jpg)](docs/media/demo.mp4)
+[![Watch the demo on YouTube: Companion for Claude](docs/media/demo-cover.jpg)](https://www.youtube.com/watch?v=Em9um7jZJz0)
 
-<sub>▶ [Watch the demo (4:40)](docs/media/demo.mp4). Real recordings of Companion running real Claude Code sessions: sessions grouped by what they need, the context breakdown, an audit, branching, side chats, notes and hand-off, and reviewing a session's changes.</sub>
+<sub>▶ [Watch the demo on YouTube (4:40)](https://www.youtube.com/watch?v=Em9um7jZJz0) or [download the MP4](docs/media/demo.mp4). Real recordings of Companion running real Claude Code sessions: sessions grouped by what they need, the context breakdown, an audit, branching, side chats, notes and hand-off, and reviewing a session's changes.</sub>
 
 ![Branching a Claude Code chat into a linked session](docs/media/branching.gif)
 
