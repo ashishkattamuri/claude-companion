@@ -202,6 +202,38 @@ try {
   await page.mouse.wheel(0, 500);
   await beat(2500);
   await shot('35-compaction');
+
+  // ── #36 Heaviest in context ────────────────────────────────────────────────────────────────
+  await section('36');
+  // New tool output after the compaction: the list only counts what's in the context now.
+  await type(composer, 'Read the first 800 lines of CHANGELOG.md, then run `grep -c retries CHANGELOG.md`, then tell me the count in one line.');
+  await composer.press('Enter');
+  await until(async () => {
+    if ((await page.locator('.approval .actions button').count()) > 0) {
+      await page.locator('.approval .actions button').first().click();
+      await until(async () => (await page.locator('.approval').count()) === 0, 15000);
+    }
+    return (await answers()) >= 4 && (await head()).includes('Ready');
+  }, 240000);
+  await settled(4);
+  const rows = page.locator('.heavy-row');
+  check('the rail lists the heaviest results in the context', await until(async () => (await rows.count()) > 0, 30000));
+  const heavyText = await page.locator('.heavy').innerText().catch(() => '');
+  console.log(`   ${heavyText.replace(/\n/g, ' | ')}`);
+  check('the changelog read is on top, with its size', /^Read [^\n]*CHANGELOG\.md[^\n]*\n~\d+(\.\d)?k/.test(await rows.first().innerText()));
+  check('reads from before the compaction are left out', (await rows.count()) <= 2);
+  await page.locator('.heavy').scrollIntoViewIfNeeded();
+  await page.locator('.heavy').hover();
+  await beat(3000);
+  await shot('36-heavy');
+  await rows.first().click();
+  check('clicking one shows it in the conversation', await until(() => page.locator('.tool.focused').isVisible(), 10000));
+  await beat(2500);
+  await page.locator('.rail').getByRole('button', { name: 'Compact without these…' }).click();
+  const focusValue = await page.locator('.rail-input').inputValue();
+  check('"Compact without these" fills in the compacting focus', /drop their raw output: Read [^;]*CHANGELOG\.md/.test(focusValue));
+  await beat(3500);
+  await shot('36-compact-focus');
 } catch (err) {
   console.error(err);
   checks.push(['no exceptions', false]);

@@ -8,6 +8,7 @@ import { chunkTurns, review, reviewModel } from '../analyze/audit/review.js';
 import { loadTimeline } from '../analyze/audit/timeline.js';
 import { buildAuditView, type AuditView } from '../analyze/audit/view.js';
 import { readEntries, searchEarlier, type EarlierChat } from '../analyze/earlier.js';
+import { heaviest, type HeavyItem } from '../analyze/heavy.js';
 import type { LlmClient } from '../analyze/llm.js';
 import { notesBehind, notesPath, readNotes, recentExchanges, updateNotes } from '../analyze/notes.js';
 import { getRecap, recapDay, removeGoneSessionsFromRecaps, removeSessionsFromRecaps } from '../analyze/recap.js';
@@ -120,6 +121,8 @@ export class CompanionService {
   /** Each session's changes, kept until its transcript grows. */
   private changes = new Map<string, { key: string; files: FileChange[]; at: number }>();
   private changesRecheck = new Map<string, NodeJS.Timeout>();
+  private heavyCache = new Map<string, { key: string; items: HeavyItem[]; at: number }>();
+  private heavyRecheck = new Map<string, NodeJS.Timeout>();
   /** Explanations being written, and why the last attempt failed, by session. */
   private explaining = new Map<string, Promise<void>>();
   private explainErrors = new Map<string, string>();
@@ -1102,7 +1105,45 @@ export class CompanionService {
       children,
       context: this.context?.get(sessionId, this.cwdOf(sessionId)) ?? null,
       changes: this.sessionChanges(sessionId, 2000).map((f) => ({ path: this.display(sessionId, f.abs), abs: f.abs, added: f.added, removed: f.removed })),
+      heavy: this.heavy(sessionId),
     };
+  }
+
+  /**
+   * The biggest tool results in the context now (since the last compaction). Re-read when the
+   * transcript changes, but at most every 3s while a chat is streaming; one more read after the
+   * last change, so the final state shows.
+   */
+  private heavy(sessionId: string): HeavyItem[] {
+    const path = this.transcriptOf(sessionId);
+    if (!path) return [];
+    const st = statSync(path);
+    // A new audit brings fixes to show, so it's part of the key too.
+    const audit = this.getAudit(sessionId).audit;
+    const key = `${path}:${st.size}:${st.mtimeMs}:${audit?.createdAt ?? ''}`;
+    const hit = this.heavyCache.get(sessionId);
+    if (hit?.key === key) return hit.items;
+    const age = hit ? Date.now() - hit.at : Infinity;
+    if (hit && age < 3000) {
+      if (!this.heavyRecheck.has(sessionId))
+        this.heavyRecheck.set(
+          sessionId,
+          setTimeout(() => {
+            this.heavyRecheck.delete(sessionId);
+            this.d.onChanged?.();
+          }, 3000 - age + 50),
+        );
+      return hit.items;
+    }
+    let items: HeavyItem[] = [];
+    try {
+      items = heaviest(loadTimeline(path), audit);
+    } catch {
+      // A transcript mid-write or unreadable: show what we had.
+      items = hit?.items ?? [];
+    }
+    this.heavyCache.set(sessionId, { key, items, at: Date.now() });
+    return items;
   }
 
   private linkTitle(sessionId: string): string | null {

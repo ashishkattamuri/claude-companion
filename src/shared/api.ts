@@ -4,6 +4,7 @@
  */
 import type { ConversationItem, PatchHunk, SessionFacts, ToolResult } from '../adapter/conversation.js';
 import type { AuditView } from '../analyze/audit/view.js';
+import type { HeavyItem } from '../analyze/heavy.js';
 import type { RecapRow } from '../analyze/recap.js';
 import type { AnalyzerStatus } from '../analyze/runner.js';
 import type { RecapSource, ServerView } from '../connectors/index.js';
@@ -16,7 +17,7 @@ import type { ProjectRow, SessionRow } from '../store/queries.js';
 export type { ConversationItem, PatchHunk, SessionFacts, ToolResult, ProjectRow, RecapRow, AnalyzerStatus, LiveSession };
 export type { ServerView, RecapSource, GitHubActivity, GitHubItem, ServerConfig };
 export type { ActionResult, CatalogPlugin, MarketplaceAction, PluginAction, PluginCatalog, PluginConfig };
-export type { AuditView };
+export type { AuditView, HeavyItem };
 export type { AuditFindingView, AuditStepRef } from '../analyze/audit/view.js';
 
 /** A session's latest audit, whether one is running, and how far the session has moved on since. */
@@ -106,6 +107,8 @@ export interface SessionExtras {
   context: ContextBreakdown | null;
   /** Files the session changed, with each file's net +/− over the session (the same as the review). */
   changes: { path: string; abs: string; added: number; removed: number }[];
+  /** The biggest tool results in the context since the last compaction, biggest first. */
+  heavy: HeavyItem[];
 }
 
 /** One hunk of a unified diff: lines start with ' ' (context), '-' (removed) or '+' (added). */

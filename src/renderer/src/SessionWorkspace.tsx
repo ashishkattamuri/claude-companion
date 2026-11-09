@@ -191,7 +191,12 @@ export function SessionWorkspace({
       </section>
       {side && <SidePanel sessionId={sessionId} chats={sideChats} view={side} onView={setSide} onClose={() => setSide(null)} onError={onError} />}
       {rail && !side && (
-        <DetailsRail state={state} items={items} extras={extras} onNavigate={onNavigate} onError={onError} onReview={() => setMode('review')} />
+        <DetailsRail state={state} items={items} extras={extras} onNavigate={onNavigate} onError={onError} onReview={() => setMode('review')}
+          onJump={(id) => {
+            setMode('conversation');
+            setFocus({ id, at: Date.now() });
+          }}
+        />
       )}
     </div>
   );

@@ -102,9 +102,11 @@ interface Props {
   onError: (message: string) => void;
   /** Opens the review of the session's changes. */
   onReview: () => void;
+  /** Shows an item in the conversation. */
+  onJump: (itemId: string) => void;
 }
 
-export function DetailsRail({ state, items, extras, onNavigate, onError, onReview }: Props) {
+export function DetailsRail({ state, items, extras, onNavigate, onError, onReview, onJump }: Props) {
   const { facts, sessionId } = state;
   const [focus, setFocus] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -171,6 +173,38 @@ export function DetailsRail({ state, items, extras, onNavigate, onError, onRevie
           </>
         ) : (
           <p className="muted small">Shows after Claude's first reply.</p>
+        )}
+        {extras && extras.heavy.length > 0 && (
+          <div className="heavy">
+            <h3 title="The biggest tool results Claude still has in its context, since the last compaction. Estimated from how much each one grew the prompt.">
+              Heaviest in context
+            </h3>
+            {extras.heavy.map((h) => (
+              <button key={h.itemId} className="heavy-row" onClick={() => onJump(h.itemId)} title={h.fix ? `Audit fix: ${h.fix}` : h.label}>
+                <span className="ellipsis mono">{h.label}</span>
+                <span className="tabular heavy-size">~{k(h.tokens)}</span>
+                <span className="muted heavy-meta">
+                  {h.turnsAgo === 0 ? 'this turn' : h.turnsAgo === 1 ? '1 message ago' : `${h.turnsAgo} messages ago`} · sent with {h.calls}{' '}
+                  {h.calls === 1 ? 'call' : 'calls'}
+                </span>
+                {h.fix && <span className="heavy-fix">Audit: {h.fix}</span>}
+              </button>
+            ))}
+            {canAct && (
+              <button
+                className="link"
+                onClick={() => {
+                  setFocus(
+                    `Keep what you concluded from these, but drop their raw output: ${extras.heavy.map((h) => (h.label.length > 70 ? `${h.label.slice(0, 69)}…` : h.label)).join('; ')}`,
+                  );
+                  document.getElementById(`compact-focus-${sessionId}`)?.focus();
+                }}
+                title="Fills in the compacting focus; edit it, then Compact"
+              >
+                Compact without these…
+              </button>
+            )}
+          </div>
         )}
         {canAct && (
           <div className="ctx-tools">

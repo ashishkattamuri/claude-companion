@@ -22,3 +22,4 @@ Short silent clips of each feature, cut from the [demo video](https://www.youtub
 | `16-cache-timer.gif` | Cache timer: how long the prompt cache stays warm, and what a cold resume costs |
 | `17-cache-misses.gif` | Cache misses explained: how much a turn processed again, and why (model switch, expiry, compaction, tool changes) |
 | `18-compaction-history.gif` | Compaction history: before and after sizes, who started it, and the summary Claude works from |
+| `19-heaviest-in-context.gif` | Heaviest in context: the biggest tool results Claude still carries, with a jump to each and "Compact without these" |
