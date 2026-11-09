@@ -144,6 +144,11 @@ const TurnView = memo(function TurnView({
           <SideBadges chats={threads.get(turn.user.id)} onOpen={onOpenSide} />
         </div>
       )}
+      {turn.cacheMisses.map((n) => (
+        <div key={n.id} className={`cache-miss ${n.cacheMiss!.reason}`} title="Judged from the transcript: what changed between this call and the one before it">
+          {n.text}
+        </div>
+      ))}
       {turn.steps.length > 0 && <Steps steps={turn.steps} cwd={cwd} openByDefault={last && live} waiting={last && waiting} focus={focus} />}
       {turn.answer.length > 0 && (
         <div className="msg-wrap answer">

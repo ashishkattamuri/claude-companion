@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SessionState } from '../../shared/api';
+import { shortModel } from '../../shared/model';
 
 interface Props {
   state: SessionState;
@@ -19,12 +20,7 @@ const MODE_LABEL: Record<string, string> = {
   manual: 'Ask before edits',
 };
 
-export function shortModel(model: string | null): string {
-  if (!model) return 'Model';
-  const m = model.match(/claude-(opus|sonnet|haiku|fable)-([\d-]+)/);
-  if (!m) return model;
-  return `${m[1]![0]!.toUpperCase()}${m[1]!.slice(1)} ${m[2]!.replace(/-\d{8}$/, '').replace('-', '.')}`;
-}
+export { shortModel };
 
 export function Composer({ state, draft, onSend, onInterrupt, onCycleMode }: Props) {
   const [text, setText] = useState(draft ?? '');

@@ -3,6 +3,8 @@
  * their results, and quiet notices. Unlike the indexer this keeps full text, because it renders
  * a single session on demand. Like the indexer it is lenient: unknown records are skipped.
  */
+import { TTL_MS, duration } from '../shared/cache.js';
+import { shortModel } from '../shared/model.js';
 
 export type ConversationItem =
   | { kind: 'user'; id: string; ts: string; text: string; images: number }
@@ -17,7 +19,22 @@ export type ConversationItem =
       /** Filled in when the tool_result arrives; until then the call is pending. */
       result: ToolResult | null;
     }
-  | { kind: 'notice'; id: string; ts: string; tone: 'info' | 'warn'; text: string };
+  | {
+      kind: 'notice';
+      id: string;
+      ts: string;
+      tone: 'info' | 'warn';
+      text: string;
+      /** Set on a model call that missed the prompt cache: what it reprocessed, and the likely cause. */
+      cacheMiss?: { tokens: number; reason: CacheMissReason };
+    };
+
+/**
+ * Why a call reprocessed the conversation instead of reading it from the cache, judged from the
+ * transcript (the API's own cache diagnostics need an API key Companion doesn't use). The first
+ * that applies wins: model, then compaction, then expiry, then a change of tools or skills.
+ */
+export type CacheMissReason = 'model' | 'compacted' | 'expired' | 'tools' | 'unknown';
 
 export interface ToolResult {
   text: string;
@@ -67,12 +84,24 @@ export const NEW_CHAT_TOOL = 'mcp__companion__start_new_chat';
 
 const MAX_RESULT_CHARS = 20_000;
 
+/**
+ * A call missed the cache when it read at least this much less than the previous call left cached.
+ * (Writing a lot is not a miss: a big tool result is new input, cached for the first time.)
+ */
+const MISS_MIN_TOKENS = 20_000;
+
+/** Records that change the tools, MCP servers or skills Claude has. */
+const TOOL_CHANGES = new Set(['deferred_tools_delta', 'mcp_instructions_delta', 'skill_listing', 'agent_listing_delta']);
+
 /** User-role text injected by the harness rather than typed by the person. */
 const HARNESS_PREFIXES = ['<command-', '<local-command', '<system-reminder>', '<bash-', '<task-notification>', 'Caveat:'];
 
 export class ConversationParser {
   private items: ConversationItem[] = [];
   private byToolUseId = new Map<string, Extract<ConversationItem, { kind: 'tool' }>>();
+  /** The previous model call, and what happened between it and the next one. */
+  private lastCall: { id: string; ts: string; model: string | null; cached: number } | null = null;
+  private since = new Set<'compacted' | 'tools'>();
   facts: SessionFacts = { model: null, permissionMode: null, contextTokens: null, costUsd: null, title: null, todos: null, newChatTool: null, cache: null };
 
   /** Feeds raw JSONL lines; returns the items that were added or changed. */
@@ -128,6 +157,7 @@ export class ConversationParser {
 
   /** Claude Code lists the (deferred) tools a session has; that tells us whether the new-chat tool is there. */
   private attachment(a: Record<string, any> | undefined): void {
+    if (TOOL_CHANGES.has(a?.type)) this.since.add('tools');
     if (a?.type !== 'deferred_tools_delta') return;
     if ((a.addedNames ?? []).includes(NEW_CHAT_TOOL)) this.facts.newChatTool = true;
     else if ((a.removedNames ?? []).includes(NEW_CHAT_TOOL)) this.facts.newChatTool = false;
@@ -135,6 +165,7 @@ export class ConversationParser {
   }
 
   private system(rec: Record<string, any>, ts: string): ConversationItem[] {
+    if (rec.subtype === 'compact_boundary') this.since.add('compacted');
     if (rec.subtype === 'compact_boundary')
       return [this.add({ kind: 'notice', id: rec.uuid, ts, tone: 'info', text: 'Conversation compacted to free up context.' })];
     if (rec.subtype === 'away_summary' && typeof rec.content === 'string')
@@ -204,9 +235,16 @@ export class ConversationParser {
         ttl,
       };
     }
-    if (!Array.isArray(msg.content)) return [];
-
     const out: ConversationItem[] = [];
+    // One call can be recorded as several records (one per content block) with the same usage.
+    if (usage && typeof msg.id === 'string' && msg.id !== this.lastCall?.id && msg.model !== '<synthetic>') {
+      const miss = this.lastCall && this.cacheMiss(this.facts.cache!, this.lastCall, msg.model ?? null);
+      if (miss) out.push(this.add({ kind: 'notice', id: `${rec.uuid}:cache`, ts, tone: miss.reason === 'compacted' ? 'info' : 'warn', text: miss.text, cacheMiss: miss }));
+      this.lastCall = { id: msg.id, ts, model: msg.model ?? null, cached: this.facts.cache!.read + this.facts.cache!.written };
+      this.since.clear();
+    }
+    if (!Array.isArray(msg.content)) return out;
+
     msg.content.forEach((block: any, i: number) => {
       // One record per content block today, but older versions put several blocks in one record.
       const id = msg.content.length > 1 ? `${rec.uuid}:${i}` : rec.uuid;
@@ -230,7 +268,34 @@ export class ConversationParser {
     });
     return out;
   }
+
+  /** Whether this call missed the cache and, if so, the likely cause in words. */
+  private cacheMiss(
+    cache: CacheFacts,
+    prev: { ts: string; model: string | null; cached: number },
+    model: string | null,
+  ): { tokens: number; reason: CacheMissReason; text: string } | null {
+    // What the previous call left cached (no more than this call's input, which compacting shrinks),
+    // minus what this one read of it: processed again.
+    const tokens = Math.min(prev.cached, cache.read + cache.written + cache.uncached) - cache.read;
+    if (tokens < MISS_MIN_TOKENS) return null;
+    const size = `~${k(tokens)} tokens`;
+    const missed = `Cache miss · ${size} processed again at full price.`;
+    const gap = Date.parse(cache.at) - Date.parse(prev.ts);
+    if (prev.model && model && prev.model !== model)
+      return { tokens, reason: 'model', text: `${missed} The model changed (${shortModel(prev.model)} → ${shortModel(model)}), and each model has its own cache.` };
+    if (this.since.has('compacted'))
+      return { tokens, reason: 'compacted', text: `${size} cached afresh after compacting, as expected: compacting replaces the conversation.` };
+    if (cache.ttl && gap > TTL_MS[cache.ttl])
+      return { tokens, reason: 'expired', text: `${missed} The cache had expired: ${duration(gap)} since the previous reply, and it lasts ${cache.ttl === '1h' ? '1 h' : '5 min'}.` };
+    if (this.since.has('tools'))
+      return { tokens, reason: 'tools', text: `${missed} The tools or skills Claude has changed just before (MCP servers, deferred tools or skills).` };
+    return { tokens, reason: 'unknown', text: `${missed} No cause found in the transcript.` };
+  }
 }
+
+/** 1500 → "1.5k", 142000 → "142k". */
+const k = (n: number) => (n >= 1e4 ? `${Math.round(n / 1e3)}k` : n >= 1e3 ? `${+(n / 1e3).toFixed(1)}k` : String(n));
 
 function toolResult(block: any, structured: any): ToolResult {
   let text = '';

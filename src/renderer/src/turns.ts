@@ -2,6 +2,7 @@ import type { ConversationItem } from '../../shared/api.js';
 
 type Tool = Extract<ConversationItem, { kind: 'tool' }>;
 type User = Extract<ConversationItem, { kind: 'user' }>;
+type Notice = Extract<ConversationItem, { kind: 'notice' }>;
 
 export interface Turn {
   id: string;
@@ -10,6 +11,8 @@ export interface Turn {
   steps: ConversationItem[];
   /** What Claude said after its last tool call: the answer, shown in full. */
   answer: ConversationItem[];
+  /** Calls in this turn that missed the prompt cache: shown under your message, not folded into the steps. */
+  cacheMisses: Notice[];
 }
 
 /** Splits a conversation at each message you sent. */
@@ -19,12 +22,15 @@ export function toTurns(items: ConversationItem[]): Turn[] {
   let user: User | null = null;
   const close = () => {
     if (!user && !body.length) return;
+    const cacheMisses = body.filter((i): i is Notice => i.kind === 'notice' && !!i.cacheMiss);
+    body = body.filter((i) => !(i.kind === 'notice' && i.cacheMiss));
     const lastTool = body.map((i) => i.kind).lastIndexOf('tool');
     turns.push({
       id: user?.id ?? body[0]!.id,
       user,
       steps: lastTool >= 0 ? body.slice(0, lastTool + 1) : body.filter((i) => i.kind === 'thinking'),
       answer: lastTool >= 0 ? body.slice(lastTool + 1) : body.filter((i) => i.kind !== 'thinking'),
+      cacheMisses,
     });
   };
   for (const item of items) {

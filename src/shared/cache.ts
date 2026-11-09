@@ -28,12 +28,13 @@ export function hitRatio(cache: CacheFacts | null): number | null {
   return total > 0 ? cache.read / total : null;
 }
 
-/** 45s → "under a minute", 38 min → "38 min", 5 h → "5 h", 3 days → "3 days". */
+/** 45s → "under a minute", 38 min → "38 min", 72 min → "1 h 12 min", 5 h → "5 h", 3 days → "3 days". */
 export function duration(ms: number): string {
   const min = Math.floor(ms / 60_000);
   if (min < 1) return 'under a minute';
   if (min < 60) return `${min} min`;
   const h = Math.floor(min / 60);
+  if (h < 2 && min % 60) return `${h} h ${min % 60} min`;
   if (h < 48) return `${h} h`;
   return `${Math.floor(h / 24)} days`;
 }

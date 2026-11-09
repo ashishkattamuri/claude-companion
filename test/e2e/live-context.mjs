@@ -2,8 +2,9 @@
 // Runs in a sandbox (see sandbox.mjs) on your own login: its own project folder and Companion DB,
 // and every chat it starts is stopped and deleted at the end.
 //
-// Usage: npm run build && npm run test:live-context [-- --record <dir>]
-//   --record <dir>  also records the window (Electron's paint stream) and writes <dir>/demo.mp4 and demo.gif
+// Usage: npm run build && npm run test:live-context [-- --record <dir> [--from <issue>]]
+//   --record <dir>   also records the window (Electron's paint stream) and writes <dir>/demo.mp4 and demo.gif
+//   --from <issue>   start the recording at that issue's section (33, 34, …); every section still runs
 // Screenshots: test/e2e/screenshots/context-*.png
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
@@ -17,6 +18,8 @@ const shots = join(repo, 'test/e2e/screenshots');
 mkdirSync(shots, { recursive: true });
 const recordAt = process.argv.indexOf('--record');
 const record = recordAt > 0 ? process.argv[recordAt + 1] : null;
+const fromAt = process.argv.indexOf('--from');
+const recordFrom = fromAt > 0 ? process.argv[fromAt + 1] : '33';
 
 const sandbox = liveSandbox('context');
 const project = sandbox.project;
@@ -48,16 +51,20 @@ const until = async (fn, ms = 120000) => {
   }
   return false;
 };
+let recording = false;
 /** On a recording, lingers so a viewer can read the screen. */
-const beat = (ms = 1500) => (record ? pause(ms) : Promise.resolve());
+const beat = (ms = 1500) => (recording ? pause(ms) : Promise.resolve());
 
 const app = await electron.launch({ args: [...(record ? ['--force-device-scale-factor=2'] : []), repo], env: sandbox.appEnv });
 const page = await app.firstWindow();
 await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 900));
 const frames = record ? join(record, 'frames') : null;
-if (frames) {
+/** Each issue's section starts here; the recording starts at the --from section. */
+async function section(issue) {
+  console.log(`── #${issue}`);
+  if (!frames || recording || issue !== recordFrom) return;
+  recording = true;
   mkdirSync(frames, { recursive: true });
-  await pause(800);
   await app.evaluate(({ BrowserWindow }, dir) => {
     const fs = process.mainModule.require('node:fs');
     const path = process.mainModule.require('node:path');
@@ -65,6 +72,7 @@ if (frames) {
       fs.writeFile(path.join(dir, `${Date.now()}.jpg`), image.toJPEG(90), () => {});
     });
   }, frames);
+  await pause(1000);
 }
 
 const shot = (name) => page.screenshot({ path: join(shots, `context-${name}.png`) });
@@ -74,7 +82,7 @@ const answers = () => page.locator('.msg-wrap.answer').count();
 const lastReply = () => page.locator('.a-text').last().innerText();
 const type = async (loc, text) => {
   await loc.click();
-  if (record) await loc.pressSequentially(text, { delay: 28 });
+  if (recording) await loc.pressSequentially(text, { delay: 28 });
   else await loc.fill(text);
 };
 /** Claude has finished: the chat is Ready and the last reply has stopped changing. */
@@ -94,6 +102,7 @@ try {
   await page.waitForSelector('.sidebar');
 
   // ── #33 Cache timer ────────────────────────────────────────────────────────────────────────
+  await section('33');
   await page.keyboard.press('Meta+n');
   await page.selectOption('#ns-project', project);
   await page.selectOption('#ns-model', 'haiku');
@@ -128,6 +137,43 @@ try {
   await page.getByRole('button', { name: 'Send here anyway' }).click();
   check('"Send here anyway" dismisses the note', await until(async () => !(await page.locator('.cold-note').isVisible()), 5000));
   await beat(1500);
+  // Back to the real time for the sections that follow.
+  await page.clock.setSystemTime(Date.now());
+
+  // ── #34 Explain cache misses ───────────────────────────────────────────────────────────────
+  // A real miss: switching models mid-chat, since each model has its own cache.
+  await section('34');
+  await type(composer, '/model sonnet');
+  await composer.press('Enter');
+  // Claude Code asks first, since the switch re-reads the whole history; Companion shows the question.
+  const yes = page.getByRole('button', { name: /Yes, switch to Sonnet/ });
+  check('Claude Code asks before switching models', await until(() => yes.isVisible(), 30000));
+  await beat(2500);
+  await yes.click();
+  check('Claude Code runs /model', await until(async () => /Ran \/model|Set model to/i.test(await page.locator('.thread').innerText()), 30000));
+  await beat(1000);
+  await type(composer, 'Without running any tools, from what you already read: what did release 1.3.7 add? One line.');
+  await composer.press('Enter');
+  // If Claude still asks to run something, let it.
+  await until(async () => {
+    if ((await page.locator('.approval .actions button').count()) > 0) {
+      await page.locator('.approval .actions button').first().click();
+      await until(async () => (await page.locator('.approval').count()) === 0, 15000);
+    }
+    return (await answers()) >= 3 && (await head()).includes('Ready');
+  }, 180000);
+  await settled(3);
+  const miss = page.locator('.cache-miss').last();
+  check('the reply after the switch is marked as a cache miss', await until(() => miss.isVisible(), 20000));
+  const missText = await miss.innerText().catch(() => '');
+  console.log(`   ${missText}`);
+  check('the marker names the model switch as the cause', /The model changed \(Haiku [\d.]+ → Sonnet [\d.]+\)/.test(missText));
+  check('the marker gives how much was processed again', /~\d+k tokens processed again/.test(missText));
+  check('earlier turns that read the cache are not marked', (await page.locator('.cache-miss').count()) === 1);
+  await miss.scrollIntoViewIfNeeded();
+  await miss.hover();
+  await beat(4000);
+  await shot('34-model-miss');
 } catch (err) {
   console.error(err);
   checks.push(['no exceptions', false]);
