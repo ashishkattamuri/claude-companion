@@ -190,6 +190,12 @@ h1, h2 { text-wrap: balance; }
 .thinking { padding: 2px 12px 2px 38px; }
 .thinking-text { margin-top: 4px; font-size: 12.5px; color: var(--muted); white-space: pre-wrap; border-left: 2px solid var(--line); padding-left: 10px; }
 .notice { font-size: 12.5px; color: var(--muted); padding: 2px 12px; }
+.compaction { max-width: 780px; margin: 10px auto 14px; padding: 8px 12px; border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line); font-size: 12.5px; }
+.compaction-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.compaction-title { color: var(--ink); }
+.compaction-summary { margin-top: 8px; max-height: 360px; overflow: auto; padding: 8px 12px; border-radius: 8px; background: var(--raised); font-size: 12.5px; }
+.compaction-summary p, .compaction-summary li { margin: 4px 0; }
+.compaction-summary pre { white-space: pre-wrap; word-break: break-word; }
 .cache-miss { max-width: 780px; margin: 0 auto 6px; padding: 6px 12px; font-size: 12.5px; color: var(--amber); background: var(--amber-soft); border-radius: 8px; }
 .cache-miss.compacted { color: var(--muted); background: var(--raised); }
 .notice.warn { color: var(--amber); }

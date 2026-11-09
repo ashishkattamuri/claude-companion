@@ -21,3 +21,4 @@ Short silent clips of each feature, cut from the [demo video](https://www.youtub
 | `15-connectors.gif` | Plugins, marketplaces and MCP servers in one place |
 | `16-cache-timer.gif` | Cache timer: how long the prompt cache stays warm, and what a cold resume costs |
 | `17-cache-misses.gif` | Cache misses explained: how much a turn processed again, and why (model switch, expiry, compaction, tool changes) |
+| `18-compaction-history.gif` | Compaction history: before and after sizes, who started it, and the summary Claude works from |

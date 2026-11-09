@@ -160,6 +160,13 @@ export function DetailsRail({ state, items, extras, onNavigate, onError, onRevie
               </div>
             )}
             <CacheLine state={state} />
+            {facts.compactions.count > 0 && (
+              <p className="muted small compacted-line">
+                Compacted {facts.compactions.count === 1 ? 'once' : `${facts.compactions.count} times`}
+                {facts.compactions.lastAt && `, last ${timeAgo(facts.compactions.lastAt)}`}
+                {facts.compactions.droppedTotal > 0 && ` · ${k(facts.compactions.droppedTotal)} tokens dropped in all`}
+              </p>
+            )}
             {pct! >= FULL_PCT && <p className="rail-warn">Getting full. Compact, or hand off to a fresh session.</p>}
           </>
         ) : (

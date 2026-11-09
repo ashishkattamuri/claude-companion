@@ -27,7 +27,22 @@ export type ConversationItem =
       text: string;
       /** Set on a model call that missed the prompt cache: what it reprocessed, and the likely cause. */
       cacheMiss?: { tokens: number; reason: CacheMissReason };
+      /** Set on a compaction: its numbers, and the summary Claude works from afterwards. */
+      compaction?: Compaction;
     };
+
+/** One compaction, from Claude Code's compact_boundary record and the summary that follows it. */
+export interface Compaction {
+  /** Started by Claude Code when the context filled up, or by you (/compact). */
+  trigger: 'auto' | 'manual' | null;
+  before: number | null;
+  after: number | null;
+  /** Tokens dropped by every compaction in the chat so far, this one included. */
+  droppedTotal: number | null;
+  durationMs: number | null;
+  /** What the model works from instead of the earlier conversation; null until it's recorded. */
+  summary: string | null;
+}
 
 /**
  * Why a call reprocessed the conversation instead of reading it from the cache, judged from the
@@ -66,6 +81,8 @@ export interface SessionFacts {
   newChatTool: boolean | null;
   /** The prompt cache as of the last model call, or null before the first one. */
   cache: CacheFacts | null;
+  /** How often the chat was compacted, when last, and how much it has dropped in all. */
+  compactions: { count: number; lastAt: string | null; droppedTotal: number };
 }
 
 /** What the last model call read from and wrote to the prompt cache, and how long the cache lives. */
@@ -102,7 +119,9 @@ export class ConversationParser {
   /** The previous model call, and what happened between it and the next one. */
   private lastCall: { id: string; ts: string; model: string | null; cached: number } | null = null;
   private since = new Set<'compacted' | 'tools'>();
-  facts: SessionFacts = { model: null, permissionMode: null, contextTokens: null, costUsd: null, title: null, todos: null, newChatTool: null, cache: null };
+  facts: SessionFacts = { model: null, permissionMode: null, contextTokens: null, costUsd: null, title: null, todos: null, newChatTool: null, cache: null, compactions: { count: 0, lastAt: null, droppedTotal: 0 } };
+  /** Compaction notices by their boundary record's uuid, so the summary that follows can join them. */
+  private compactionsById = new Map<string, Extract<ConversationItem, { kind: 'notice' }>>();
 
   /** Feeds raw JSONL lines; returns the items that were added or changed. */
   push(lines: string[]): ConversationItem[] {
@@ -165,9 +184,7 @@ export class ConversationParser {
   }
 
   private system(rec: Record<string, any>, ts: string): ConversationItem[] {
-    if (rec.subtype === 'compact_boundary') this.since.add('compacted');
-    if (rec.subtype === 'compact_boundary')
-      return [this.add({ kind: 'notice', id: rec.uuid, ts, tone: 'info', text: 'Conversation compacted to free up context.' })];
+    if (rec.subtype === 'compact_boundary') return [this.compacted(rec, ts)];
     if (rec.subtype === 'away_summary' && typeof rec.content === 'string')
       return [
         this.add({
@@ -183,7 +200,13 @@ export class ConversationParser {
 
   private user(rec: Record<string, any>, ts: string): ConversationItem[] {
     const content = rec.message?.content;
-    if (rec.isCompactSummary) return [];
+    if (rec.isCompactSummary) {
+      const notice = this.compactionsById.get(rec.parentUuid) ?? [...this.compactionsById.values()].at(-1);
+      if (!notice?.compaction) return [];
+      const text = typeof content === 'string' ? content : Array.isArray(content) ? content.map((b: any) => (b?.type === 'text' ? b.text : '')).join('\n') : '';
+      notice.compaction.summary = summaryBody(text);
+      return [notice];
+    }
     if (typeof content === 'string') return this.userText(rec, ts, content, 0);
     if (!Array.isArray(content)) return [];
 
@@ -269,6 +292,32 @@ export class ConversationParser {
     return out;
   }
 
+  private compacted(rec: Record<string, any>, ts: string): ConversationItem {
+    this.since.add('compacted');
+    const m = rec.compactMetadata ?? {};
+    const num = (v: unknown) => (typeof v === 'number' ? v : null);
+    const compaction: Compaction = {
+      trigger: m.trigger === 'auto' || m.trigger === 'manual' ? m.trigger : null,
+      before: num(m.preTokens),
+      after: num(m.postTokens),
+      droppedTotal: num(m.cumulativeDroppedTokens),
+      durationMs: num(m.durationMs),
+      summary: null,
+    };
+    const c = this.facts.compactions;
+    const dropped = compaction.droppedTotal ?? c.droppedTotal + (compaction.before !== null && compaction.after !== null ? compaction.before - compaction.after : 0);
+    this.facts.compactions = { count: c.count + 1, lastAt: ts, droppedTotal: dropped };
+    // The context is the compacted size from here, not what the last call before it used.
+    if (compaction.after !== null) this.facts.contextTokens = compaction.after;
+    const text =
+      compaction.before !== null && compaction.after !== null
+        ? `Compacted ${k(compaction.before)} → ${k(compaction.after)} tokens`
+        : 'Conversation compacted to free up context.';
+    const notice = this.add({ kind: 'notice', id: rec.uuid, ts, tone: 'info', text, compaction }) as Extract<ConversationItem, { kind: 'notice' }>;
+    this.compactionsById.set(rec.uuid, notice);
+    return notice;
+  }
+
   /** Whether this call missed the cache and, if so, the likely cause in words. */
   private cacheMiss(
     cache: CacheFacts,
@@ -296,6 +345,13 @@ export class ConversationParser {
 
 /** 1500 → "1.5k", 142000 → "142k". */
 const k = (n: number) => (n >= 1e4 ? `${Math.round(n / 1e3)}k` : n >= 1e3 ? `${+(n / 1e3).toFixed(1)}k` : String(n));
+
+/** The summary without Claude Code's lead-in ("This session is being continued … Summary:"). */
+function summaryBody(text: string): string {
+  const t = text.trim();
+  const at = t.search(/^Summary:\s*$/m);
+  return (at >= 0 && at < 400 ? t.slice(at).replace(/^Summary:\s*/, '') : t).trim();
+}
 
 function toolResult(block: any, structured: any): ToolResult {
   let text = '';

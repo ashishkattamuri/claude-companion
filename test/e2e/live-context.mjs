@@ -174,6 +174,34 @@ try {
   await miss.hover();
   await beat(4000);
   await shot('34-model-miss');
+
+  // ── #35 Compaction history ─────────────────────────────────────────────────────────────────
+  await section('35');
+  await type(page.locator('.rail-input'), 'Keep the release numbers we found');
+  await beat(800);
+  await page.locator('.rail').getByRole('button', { name: 'Compact', exact: true }).click();
+  const marker = page.locator('.compaction').last();
+  check('a compaction marker appears in the conversation', await until(() => marker.isVisible(), 240000));
+  await marker.scrollIntoViewIfNeeded();
+  const markerText = await marker.innerText();
+  console.log(`   ${markerText.replace(/\n/g, ' | ')}`);
+  check('it shows the size before and after', /Compacted \d+k → \d+k tokens/.test(markerText));
+  check('it says you started it', /by you/.test(markerText));
+  const kept = marker.getByRole('button', { name: 'What Claude kept' });
+  check('the summary Claude kept can be opened', await until(() => kept.isVisible(), 60000));
+  check('the rail counts the compaction', /Compacted once/.test(await page.locator('.rail').innerText()));
+  const after = Number(markerText.match(/→ (\d+)k/)?.[1]);
+  check('the rail headline shows the compacted size', (await page.locator('.rail-big .muted').innerText()).startsWith(`${after}k`));
+  await beat(2000);
+  await kept.click();
+  const summaryText = await page.locator('.compaction-summary').innerText().catch(() => '');
+  check('the summary is the one Claude works from (it mentions the changelog)', /changelog/i.test(summaryText));
+  check('the summary keeps the focus you gave (release 1.3.7)', /1\.3\.7/.test(summaryText));
+  await page.locator('.compaction-summary').hover();
+  await beat(2500);
+  await page.mouse.wheel(0, 500);
+  await beat(2500);
+  await shot('35-compaction');
 } catch (err) {
   console.error(err);
   checks.push(['no exceptions', false]);

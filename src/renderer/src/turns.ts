@@ -13,9 +13,11 @@ export interface Turn {
   answer: ConversationItem[];
   /** Calls in this turn that missed the prompt cache: shown under your message, not folded into the steps. */
   cacheMisses: Notice[];
+  /** A compaction stands on its own between turns, where it happened. */
+  compaction?: Notice;
 }
 
-/** Splits a conversation at each message you sent. */
+/** Splits a conversation at each message you sent, and around each compaction. */
 export function toTurns(items: ConversationItem[]): Turn[] {
   const turns: Turn[] = [];
   let body: ConversationItem[] = [];
@@ -34,7 +36,12 @@ export function toTurns(items: ConversationItem[]): Turn[] {
     });
   };
   for (const item of items) {
-    if (item.kind === 'user') {
+    if (item.kind === 'notice' && item.compaction) {
+      close();
+      turns.push({ id: item.id, user: null, steps: [], answer: [], cacheMisses: [], compaction: item });
+      user = null;
+      body = [];
+    } else if (item.kind === 'user') {
       close();
       user = item;
       body = [];

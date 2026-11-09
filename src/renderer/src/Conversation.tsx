@@ -3,6 +3,7 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ConversationItem, ScreenPrompt, SessionState, SideChat } from '../../shared/api';
 import type { SideAnchor } from './SidePanel';
+import { CompactionMarker } from './CompactionMarker';
 import { describeTool, summarizeSteps, toTurns, type Turn } from './turns';
 
 type Tool = Extract<ConversationItem, { kind: 'tool' }>;
@@ -121,6 +122,7 @@ const TurnView = memo(function TurnView({
   onAskSide?: (anchor: SideAnchor) => void;
   onOpenSide?: (chatId: string) => void;
 }) {
+  if (turn.compaction) return <CompactionMarker notice={turn.compaction} />;
   // The answer can be asked about once it's written: its text is what Claude said after its last step.
   const answerText = turn.answer.flatMap((i) => (i.kind === 'assistant' ? [i.text] : [])).join('\n\n');
   const answerId = turn.answer.findLast((i) => i.kind === 'assistant')?.id ?? null;
