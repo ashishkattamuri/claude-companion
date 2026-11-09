@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ContextBreakdown, ConversationItem, SessionExtras, SessionState } from '../../shared/api';
 import { contextWindowFor } from '../../shared/contextWindow';
 import { api } from './api';
+import { CacheLine } from './CacheStatus';
 import { timeAgo } from './format';
 import { describeTool } from './turns';
 
@@ -158,6 +159,7 @@ export function DetailsRail({ state, items, extras, onNavigate, onError, onRevie
                 <span className={pct! >= FULL_PCT ? 'hot' : ''} style={{ width: `${pct}%` }} />
               </div>
             )}
+            <CacheLine state={state} />
             {pct! >= FULL_PCT && <p className="rail-warn">Getting full. Compact, or hand off to a fresh session.</p>}
           </>
         ) : (

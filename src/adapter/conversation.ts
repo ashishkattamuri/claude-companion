@@ -47,6 +47,20 @@ export interface SessionFacts {
    * has listed its tools (on its first turn), null before that.
    */
   newChatTool: boolean | null;
+  /** The prompt cache as of the last model call, or null before the first one. */
+  cache: CacheFacts | null;
+}
+
+/** What the last model call read from and wrote to the prompt cache, and how long the cache lives. */
+export interface CacheFacts {
+  /** When the call's response was recorded; the cache lives for `ttl` after it. */
+  at: string;
+  read: number;
+  written: number;
+  /** Input past the last cache breakpoint: processed at full price and not cached. */
+  uncached: number;
+  /** From the cache writes so far (reads don't say); null until one is seen. */
+  ttl: '5m' | '1h' | null;
 }
 
 export const NEW_CHAT_TOOL = 'mcp__companion__start_new_chat';
@@ -59,7 +73,7 @@ const HARNESS_PREFIXES = ['<command-', '<local-command', '<system-reminder>', '<
 export class ConversationParser {
   private items: ConversationItem[] = [];
   private byToolUseId = new Map<string, Extract<ConversationItem, { kind: 'tool' }>>();
-  facts: SessionFacts = { model: null, permissionMode: null, contextTokens: null, costUsd: null, title: null, todos: null, newChatTool: null };
+  facts: SessionFacts = { model: null, permissionMode: null, contextTokens: null, costUsd: null, title: null, todos: null, newChatTool: null, cache: null };
 
   /** Feeds raw JSONL lines; returns the items that were added or changed. */
   push(lines: string[]): ConversationItem[] {
@@ -180,6 +194,15 @@ export class ConversationParser {
     if (usage && typeof usage.input_tokens === 'number') {
       this.facts.contextTokens =
         usage.input_tokens + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.output_tokens ?? 0);
+      const split = usage.cache_creation ?? {};
+      const ttl = split.ephemeral_1h_input_tokens > 0 ? '1h' : split.ephemeral_5m_input_tokens > 0 ? '5m' : (this.facts.cache?.ttl ?? null);
+      this.facts.cache = {
+        at: ts,
+        read: usage.cache_read_input_tokens ?? 0,
+        written: usage.cache_creation_input_tokens ?? 0,
+        uncached: usage.input_tokens,
+        ttl,
+      };
     }
     if (!Array.isArray(msg.content)) return [];
 

@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import { api } from './api';
+import { ColdCacheNote } from './CacheStatus';
 import { AuditPanel, useAudit, wasteLabel } from './AuditPanel';
 import { Composer, shortModel } from './Composer';
 import { Conversation } from './Conversation';
@@ -166,6 +167,10 @@ export function SessionWorkspace({
                 sideChats={sideChats}
                 onAskSide={askSide}
                 onOpenSide={openSide}
+              />
+              <ColdCacheNote
+                state={state}
+                onHandOff={() => void api.handOff(sessionId).then((r) => !r.ok && onError(r.error))}
               />
               <Composer
                 state={state}

@@ -19,3 +19,4 @@ Short silent clips of each feature, cut from the [demo video](https://www.youtub
 | `13-review.gif` | Review a session's changes like a pull request |
 | `14-approvals.gif` | Permission prompts answered in the conversation |
 | `15-connectors.gif` | Plugins, marketplaces and MCP servers in one place |
+| `16-cache-timer.gif` | Cache timer: how long the prompt cache stays warm, and what a cold resume costs |

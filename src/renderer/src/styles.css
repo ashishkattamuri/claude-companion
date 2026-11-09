@@ -291,6 +291,14 @@ button.chip:hover:not(:disabled) { color: var(--ink); }
 .file { display: flex; justify-content: space-between; gap: 8px; font: 12px var(--mono); padding: 2px 0; }
 .kv { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size: 12.5px; color: var(--muted); }
 .kv > :nth-child(even) { color: var(--ink); text-align: right; max-width: 140px; }
+.cache-line { font-size: 12px; margin: 6px 0 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.cache-line .cache-ratio { flex-basis: 100%; padding-left: 13px; font-size: 11.5px; }
+.cache-line .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex-shrink: 0; margin-right: 2px; }
+.cache-line.warm .dot { background: var(--green); }
+.cache-line.cold { color: var(--amber); }
+.cache-line.cold .dot { background: var(--amber); }
+.cold-note { max-width: 780px; margin: 0 auto 8px; padding: 8px 12px; border: 1px solid var(--line); border-left: 3px solid var(--amber); border-radius: 10px; background: var(--raised); font-size: 12.5px; display: flex; flex-direction: column; gap: 4px; }
+.cold-actions { display: flex; gap: 14px; }
 .rail-warn { font-size: 12px; color: var(--amber); margin: 0 0 4px; }
 .ctx-tools { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .rail-input { width: 100%; font-size: 12.5px; padding: 6px 9px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); outline: none; }
