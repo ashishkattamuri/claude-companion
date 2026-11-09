@@ -234,6 +234,53 @@ try {
   check('"Compact without these" fills in the compacting focus', /drop their raw output: Read [^;]*CHANGELOG\.md/.test(focusValue));
   await beat(3500);
   await shot('36-compact-focus');
+  await page.locator('.rail-input').fill('');
+
+  // ── #37 Warn before an action breaks the cache ─────────────────────────────────────────────
+  // Nothing is changed for real: adding or removing a server would change the tools in your own
+  // running chats too, so the warnings are checked and the actions left undone.
+  await section('37');
+  const ctxNow = (await page.locator('.rail-big .muted').innerText()).match(/^([\d.]+k)/)?.[1];
+  await type(composer, '/model opus');
+  const modelNote = page.locator('.model-note');
+  check('typing /model warns that the switch reprocesses the chat', await until(() => modelNote.isVisible(), 5000));
+  check(`…with the chat's size (${ctxNow})`, (await modelNote.innerText()).includes(`~${ctxNow} tokens`));
+  await beat(3500);
+  await shot('37-model-note');
+  await composer.fill('');
+  check('the note goes when the command is cleared', await until(async () => !(await modelNote.isVisible()), 5000));
+
+  const title = (await page.locator('.head h1').innerText()).trim();
+  await page.getByRole('button', { name: 'Connectors' }).click();
+  await page.getByText(/^MCP servers \(\d+\)$/).click();
+  await beat(1000);
+  await type(page.getByLabel('Server name'), 'github');
+  await type(page.getByLabel('Server URL or command'), 'https://api.githubcopilot.com/mcp/');
+  const impactNote = page.locator('.impact-note');
+  check('adding a server warns which running chats it reaches', await until(() => impactNote.isVisible(), 15000));
+  const impactText = await impactNote.innerText();
+  console.log(`   ${impactText.replace(/\n/g, ' | ')}`);
+  check('…naming this chat and its size', impactText.includes(title) && impactText.includes(`~${ctxNow}`));
+  await impactNote.scrollIntoViewIfNeeded();
+  await beat(4500);
+  await shot('37-add-server');
+  await page.getByLabel('Server name').fill('');
+  await page.getByLabel('Server URL or command').fill('');
+
+  // The remove confirmation says the same; answered Cancel, so nothing is removed.
+  const remove = page.locator('.server-row button', { hasText: 'Remove…' }).first();
+  if (await remove.count()) {
+    await app.evaluate(({ dialog }) => {
+      globalThis.__lastDialog = null;
+      dialog.showMessageBox = async (_w, opts) => ((globalThis.__lastDialog = opts), { response: 1 });
+    });
+    await remove.click();
+    await until(() => app.evaluate(() => !!globalThis.__lastDialog), 10000);
+    const detail = await app.evaluate(() => globalThis.__lastDialog?.detail ?? '');
+    check('the remove confirmation lists the running chats it reaches', detail.includes('changes the tools in 1 running chat') && detail.includes(title));
+  } else {
+    console.log('– no MCP server to try removing; skipped the remove-dialog check');
+  }
 } catch (err) {
   console.error(err);
   checks.push(['no exceptions', false]);

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SessionState } from '../../shared/api';
+import { COLD_WARN_TOKENS, cacheStatus, tokens } from '../../shared/cache';
 import { shortModel } from '../../shared/model';
 
 interface Props {
@@ -63,8 +64,19 @@ export function Composer({ state, draft, onSend, onInterrupt, onCycleMode }: Pro
           ? 'Type to queue a message for when Claude is done…'
           : 'Message Claude…';
 
+  // Switching models drops this chat's cache (each model has its own), unless it has expired anyway.
+  const ctx = state.facts.contextTokens ?? 0;
+  const modelNote =
+    /^\/model(\s|$)/.test(text.trim()) && ctx >= COLD_WARN_TOKENS && cacheStatus(state.facts.cache, Date.now())?.state !== 'expired';
+
   return (
     <div className="composer">
+      {modelNote && (
+        <div className="model-note" role="status">
+          Switching models processes this chat's ~{tokens(ctx)} tokens again at full price on your next message, since each model has its own cache.
+          A hand-off to a fresh session starts small instead.
+        </div>
+      )}
       {error && (
         <div className="composer-error" role="alert">
           {error}

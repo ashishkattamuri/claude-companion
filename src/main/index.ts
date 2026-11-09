@@ -7,6 +7,7 @@ import { readLiveSessions } from '../ingest/live.js';
 import { socketPath } from '../mcp/protocol.js';
 import { openDb } from '../store/db.js';
 import type { MarketplaceAction, NewSessionRequest, PluginAction, ServerConfig, SideAsk } from '../shared/api.js';
+import { cacheImpactText } from '../shared/cache.js';
 import { listenForSessions } from './app-socket.js';
 import { resolveShellPath, sessionEnv } from './env.js';
 import { CompanionService } from './service.js';
@@ -163,11 +164,14 @@ app.whenReady().then(() => {
   ipcMain.handle('connectors:setEnabled', (_e, name: string, enabled: boolean) => service.setConnectorEnabled(name, enabled));
   ipcMain.handle('connectors:add', (_e, name: string, config: ServerConfig) => service.addServer(name, config));
   ipcMain.handle('connectors:dismissOffer', () => service.dismissGithubOffer());
+  ipcMain.handle('connectors:impact', () => service.toolChangeImpact());
   ipcMain.handle('connectors:remove', async (_e, name: string) => {
     const r = await dialog.showMessageBox(win!, {
       type: 'warning',
       message: `Remove ${name} from Claude Code?`,
-      detail: `It's removed for every Claude Code session, not just Companion, along with its saved settings. To only stop Companion using it, turn it off instead.`,
+      detail:
+        `It's removed for every Claude Code session, not just Companion, along with its saved settings. To only stop Companion using it, turn it off instead.` +
+        cacheImpactText(service.toolChangeImpact()),
       buttons: ['Remove', 'Cancel'],
       defaultId: 1,
       cancelId: 1,

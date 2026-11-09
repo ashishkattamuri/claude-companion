@@ -111,6 +111,15 @@ export interface SessionExtras {
   heavy: HeavyItem[];
 }
 
+/**
+ * Running chats with a warm cache that a change of tools reaches right away: Claude Code picks up an
+ * MCP server added or removed mid-chat, and the next message reprocesses the whole conversation.
+ */
+export interface ToolChangeImpact {
+  chats: { id: string; title: string; tokens: number }[];
+  total: number;
+}
+
 /** One hunk of a unified diff: lines start with ' ' (context), '-' (removed) or '+' (added). */
 export interface ReviewHunk {
   oldStart: number;
@@ -296,6 +305,8 @@ export interface CompanionApi {
 
   /** MCP servers from Claude Code's settings and from enabled plugins. */
   listServers(): Promise<ServerView[]>;
+  /** Running chats an MCP server added or removed now would reach, and what each would reprocess. */
+  toolChangeImpact(): Promise<ToolChangeImpact>;
   /** Connects to a server to see whether it works (and who it's signed in as). */
   checkConnector(name: string): Promise<ServerView | null>;
   /** Lets Companion read from a server (e.g. GitHub for the recap), or stops it and forgets what it fetched. */

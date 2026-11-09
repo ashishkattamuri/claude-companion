@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { ConversationParser } from '../src/adapter/conversation.js';
-import { cacheStatus, duration, hitRatio } from '../src/shared/cache.js';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { lastCall } from '../src/adapter/lastCall.js';
+import { cacheImpactText, cacheStatus, duration, hitRatio } from '../src/shared/cache.js';
 import { toTurns } from '../src/renderer/src/turns.js';
 
 const call = (uuid: string, timestamp: string, usage: Record<string, unknown>) =>
@@ -121,5 +125,33 @@ describe('cache misses', () => {
     const last = toTurns(p.all()).at(-1)!;
     expect(last.cacheMisses).toHaveLength(1);
     expect(last.answer.some((i) => i.kind === 'notice')).toBe(false);
+  });
+});
+
+describe('tool-change impact', () => {
+  it('says nothing when no running chat is reached', () => {
+    expect(cacheImpactText({ chats: [], total: 0 })).toBe('');
+  });
+
+  it('lists the chats a change of tools reaches and what they reprocess', () => {
+    const text = cacheImpactText({ chats: [{ title: 'Retry webhooks', tokens: 180_000 }, { title: 'Fix login', tokens: 42_500 }], total: 222_500 });
+    expect(text).toContain('changes the tools in 2 running chats right away');
+    expect(text).toContain('(~223k tokens in all)');
+    expect(text).toContain('• Retry webhooks: ~180k\n• Fix login: ~43k');
+  });
+
+  it("reads a chat's context and cache from the end of its transcript", () => {
+    const dir = mkdtempSync(join(tmpdir(), 'companion-lastcall-'));
+    try {
+      const path = join(dir, 's.jsonl');
+      const usage = { input_tokens: 5, cache_read_input_tokens: 60_000, cache_creation_input_tokens: 2_000, cache_creation: { ephemeral_1h_input_tokens: 2_000 }, output_tokens: 100 };
+      const filler = JSON.stringify({ type: 'user', uuid: 'f', message: { role: 'user', content: 'x'.repeat(700_000) } });
+      const call = JSON.stringify({ type: 'assistant', uuid: 'a', timestamp: '2026-11-08T10:00:00Z', message: { id: 'm', role: 'assistant', model: 'claude-haiku-5-5', content: [], usage } });
+      writeFileSync(path, `${filler}\n${call}\n`);
+      expect(lastCall(path)).toEqual({ tokens: 62_105, cache: { at: '2026-11-08T10:00:00Z', read: 60_000, written: 2_000, uncached: 5, ttl: '1h' } });
+      expect(lastCall(join(dir, 'missing.jsonl'))).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

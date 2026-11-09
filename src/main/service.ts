@@ -9,6 +9,8 @@ import { loadTimeline } from '../analyze/audit/timeline.js';
 import { buildAuditView, type AuditView } from '../analyze/audit/view.js';
 import { readEntries, searchEarlier, type EarlierChat } from '../analyze/earlier.js';
 import { heaviest, type HeavyItem } from '../analyze/heavy.js';
+import { lastCall } from '../adapter/lastCall.js';
+import { cacheStatus } from '../shared/cache.js';
 import type { LlmClient } from '../analyze/llm.js';
 import { notesBehind, notesPath, readNotes, recentExchanges, updateNotes } from '../analyze/notes.js';
 import { getRecap, recapDay, removeGoneSessionsFromRecaps, removeSessionsFromRecaps } from '../analyze/recap.js';
@@ -46,6 +48,7 @@ import type {
   Result,
   ReviewView,
   SessionExtras,
+  ToolChangeImpact,
   SessionListItem,
   SessionSnapshot,
   SessionState,
@@ -92,6 +95,8 @@ export interface ServiceDeps {
 
 const ok: Result = { ok: true, value: undefined };
 const NEW_CHAT_TOOL = 'mcp__companion__start_new_chat';
+/** A chat smaller than this isn't worth warning about when its cache would be lost. */
+const IMPACT_MIN_TOKENS = 20_000;
 const SEARCH_EARLIER_TOOL = 'mcp__companion__search_earlier_conversation';
 /** `claude mcp add` name for the user-scope registration. */
 const MCP_NAME = 'companion';
@@ -1107,6 +1112,25 @@ export class CompanionService {
       changes: this.sessionChanges(sessionId, 2000).map((f) => ({ path: this.display(sessionId, f.abs), abs: f.abs, added: f.added, removed: f.removed })),
       heavy: this.heavy(sessionId),
     };
+  }
+
+  /**
+   * Running chats that a change of tools (an MCP server added or removed) reaches right away, with
+   * the context each would process again at full price. Chats with a small context, or whose cache
+   * has already expired (they reprocess anyway), aren't counted.
+   */
+  toolChangeImpact(): ToolChangeImpact {
+    const chats: ToolChangeImpact['chats'] = [];
+    for (const l of this.d.loadLive()) {
+      const facts = this.channels.get(l.sessionId)?.state.facts;
+      const path = facts?.contextTokens ? null : this.transcriptOf(l.sessionId);
+      const last = facts?.contextTokens ? { tokens: facts.contextTokens, cache: facts.cache } : path ? lastCall(path) : null;
+      if (!last || last.tokens < IMPACT_MIN_TOKENS) continue;
+      if (cacheStatus(last.cache, Date.now())?.state === 'expired') continue;
+      const title = getSession(this.d.db, l.sessionId)?.title ?? this.channels.get(l.sessionId)?.state.title ?? l.name ?? 'Untitled chat';
+      chats.push({ id: l.sessionId, title, tokens: last.tokens });
+    }
+    return { chats: chats.sort((a, b) => b.tokens - a.tokens), total: chats.reduce((n, c) => n + c.tokens, 0) };
   }
 
   /**

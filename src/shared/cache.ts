@@ -28,6 +28,21 @@ export function hitRatio(cache: CacheFacts | null): number | null {
   return total > 0 ? cache.read / total : null;
 }
 
+/** 1500 → "1.5k", 142000 → "142k", 1200000 → "1.2M". */
+export const tokens = (n: number) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : n >= 1e3 ? `${+(n / 1e3).toFixed(1)}k` : String(n));
+
+/** For a confirmation: what a change of tools costs the running chats, or '' when it reaches none. */
+export function cacheImpactText(impact: { chats: { title: string; tokens: number }[]; total: number }): string {
+  const { chats, total } = impact;
+  if (!chats.length) return '';
+  const which = chats.length === 1 ? '1 running chat' : `${chats.length} running chats`;
+  const list = chats.map((c) => `• ${c.title}: ~${tokens(c.tokens)}`).join('\n');
+  return (
+    `\n\nIt also changes the tools in ${which} right away, so ${chats.length === 1 ? 'its' : 'each one’s'} next message processes the whole ` +
+    `conversation again at full price instead of reading it from the cache (~${tokens(total)} tokens${chats.length === 1 ? '' : ' in all'}):\n${list}`
+  );
+}
+
 /** 45s → "under a minute", 38 min → "38 min", 72 min → "1 h 12 min", 5 h → "5 h", 3 days → "3 days". */
 export function duration(ms: number): string {
   const min = Math.floor(ms / 60_000);

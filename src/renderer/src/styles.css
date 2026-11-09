@@ -391,6 +391,11 @@ button.chip:hover:not(:disabled) { color: var(--ink); }
 .server-row + .server-row { border-top: 1px solid var(--line); }
 .btn.danger { color: var(--red); }
 .add-server { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.impact-note { margin: 4px 0 10px; padding: 8px 12px; border: 1px solid var(--line); border-left: 3px solid var(--amber); border-radius: 10px; background: var(--raised); font-size: 12.5px; }
+.impact-note p { margin: 0 0 6px; }
+.impact-note ul { list-style: none; margin: 0 0 6px; padding: 0; }
+.impact-note li { display: flex; justify-content: space-between; gap: 12px; min-width: 0; }
+.model-note { max-width: 780px; margin: 0 auto 6px; font-size: 12.5px; color: var(--amber); }
 .input { font: 13px var(--sans); color: var(--ink); background: var(--raised); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; outline: none; min-width: 0; }
 .input:focus { border-color: var(--accent); }
 

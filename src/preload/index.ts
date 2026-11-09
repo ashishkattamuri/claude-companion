@@ -51,6 +51,7 @@ const api: CompanionApi = {
   pluginConfig: (id) => ipcRenderer.invoke('plugins:config', id),
   savePluginConfig: (id, values) => ipcRenderer.invoke('plugins:saveConfig', id, values),
   listServers: () => ipcRenderer.invoke('connectors:list'),
+  toolChangeImpact: () => ipcRenderer.invoke('connectors:impact'),
   checkConnector: (name) => ipcRenderer.invoke('connectors:check', name),
   setConnectorEnabled: (name, enabled) => ipcRenderer.invoke('connectors:setEnabled', name, enabled),
   addServer: (name, config) => ipcRenderer.invoke('connectors:add', name, config),

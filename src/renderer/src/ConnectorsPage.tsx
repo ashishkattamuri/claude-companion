@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { CatalogPlugin, PluginAction, PluginCatalog, PluginConfig, ServerView } from '../../shared/api';
+import type { CatalogPlugin, PluginAction, PluginCatalog, PluginConfig, ServerView, ToolChangeImpact } from '../../shared/api';
+import { tokens } from '../../shared/cache';
 import { api } from './api';
 
 export type ConnectorsTab = 'discover' | 'installed' | 'marketplaces' | 'servers';
@@ -87,7 +88,7 @@ export function ConnectorsPage({ initial, onError }: Props) {
       <header className="page-header">
         <div>
           <h1>Connectors</h1>
-          <div className="muted">Claude Code's plugins and MCP servers. Changes apply to every Claude Code session you start next.</div>
+          <div className="muted">Claude Code's plugins and MCP servers. Changes apply to every Claude Code session, including the ones running now.</div>
         </div>
       </header>
 
@@ -426,6 +427,17 @@ function Servers({ servers, busy, run }: { servers: ServerView[]; busy: string |
   const [name, setName] = useState('');
   const [target, setTarget] = useState('');
   const [header, setHeader] = useState('');
+  const [impact, setImpact] = useState<ToolChangeImpact | null>(null);
+  const editing = !!(name.trim() || target.trim());
+  // Which running chats an added server would reach, read again each time you start filling the form in.
+  useEffect(() => {
+    if (!editing) return;
+    let live = true;
+    void api.toolChangeImpact().then((i) => live && setImpact(i));
+    return () => {
+      live = false;
+    };
+  }, [editing]);
   const add = async () => {
     const t = target.trim();
     const [hKey, ...hRest] = header.split(':');
@@ -456,6 +468,26 @@ function Servers({ servers, busy, run }: { servers: ServerView[]; busy: string |
           {busy === 'server:add' ? 'Adding…' : 'Add'}
         </button>
       </div>
+      {editing && impact && impact.chats.length > 0 && (
+        <div className="impact-note" role="status">
+          <p>
+            Adding a server changes the tools in{' '}
+            <b>{impact.chats.length === 1 ? '1 running chat' : `${impact.chats.length} running chats`}</b> right away.{' '}
+            {impact.chats.length === 1 ? 'Its' : 'Each one’s'} next message processes the whole conversation again at full price instead of reading it from
+            the cache: <b className="tabular">~{tokens(impact.total)} tokens</b>
+            {impact.chats.length > 1 ? ' in all' : ''}.
+          </p>
+          <ul>
+            {impact.chats.map((c) => (
+              <li key={c.id}>
+                <span className="ellipsis">{c.title}</span>
+                <span className="tabular">~{tokens(c.tokens)}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="muted small">Chats you start afterwards, and chats whose cache has already expired, aren't affected.</p>
+        </div>
+      )}
       <p className="muted small">
         Added for every Claude Code session (user scope). Servers added for a single project, and connectors that come with your claude.ai
         account, work in your Claude Code chats but aren't listed here.
