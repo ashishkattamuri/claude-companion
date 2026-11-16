@@ -19,6 +19,7 @@ import { cachedExplanations, explainChanges } from '../analyze/review.js';
 import { isTrivial, overviewKey, relevantRequests, storedOverview, trivialOverview, writeOverview } from '../analyze/overview.js';
 import { fileKeys, fileReview, readMarks, setMark } from '../analyze/reviewMarks.js';
 import { readCheckpoint, saveCheckpoint, sinceLastLook } from '../analyze/since.js';
+import { buildPackage, childStateKey, claimForSend, listReturns, readHandoff, savePackage, toPackage, unclaim } from '../analyze/handoff.js';
 import { changeIsStale, changeRef, matchingHunk } from '../shared/changeRef.js';
 import { analysisNeeded, currentStatus, runJobs } from '../analyze/runner.js';
 import type { Config } from '../config.js';
@@ -49,7 +50,11 @@ import type { SearchEarlierRequest, SocketRequest, SocketResponse } from '../mcp
 import type {
   AuditState,
   ChangeRef,
+  HandoffDraft,
+  HandoffParts,
+  HandoffRecord,
   NewSessionRequest,
+  ReturnPackage,
   RecapView,
   Result,
   ReviewView,
@@ -797,18 +802,25 @@ export class CompanionService {
    * parent's notes (plus any exchanges the notes don't cover yet) as hidden background context.
    * The new chat starts working on `prompt` right away, and the window switches to it.
    */
-  async branch(parentId: string, opts: { kind: 'branch' | 'handoff'; title: string; prompt: string }): Promise<Result<string>> {
+  async branch(
+    parentId: string,
+    opts: { kind: 'branch' | 'handoff'; title: string; prompt: string; parts?: Omit<HandoffParts, 'previewed'> },
+  ): Promise<Result<string>> {
     this.refresh();
     const parent = getSession(this.d.db, parentId);
     const cwd = parent?.cwd ?? this.channels.get(parentId)?.state.cwd;
     if (!cwd || !existsSync(cwd)) return { ok: false, error: 'The original chat\'s project folder was not found.' };
+    // What the new chat is given: what you edited in the preview, or the parent's notes, latest exchanges and pins.
+    const parts: HandoffParts = opts.parts
+      ? { ...opts.parts, previewed: true }
+      : { notes: readNotes(this.d.db, parentId)?.text ?? null, recent: recentExchanges(this.d.db, parentId) || null, pins: this.pins(parentId), previewed: false };
     const context = branchContext({
       parentTitle: parent?.title ?? 'earlier chat',
       parentId,
       kind: opts.kind,
-      notes: readNotes(this.d.db, parentId)?.text ?? null,
-      recent: recentExchanges(this.d.db, parentId),
-      pins: this.pins(parentId),
+      notes: parts.notes,
+      recent: parts.recent ?? '',
+      pins: parts.pins,
     });
     // Same model as the chat it came from.
     const model = this.channels.get(parentId)?.state.facts.model;
@@ -830,9 +842,9 @@ export class CompanionService {
       return { ok: false, error: `Could not start the new chat: ${(err as Error).message}` };
     }
     this.d.db
-      .prepare(`INSERT OR REPLACE INTO session_links(child_id, parent_id, title, kind, created_at) VALUES (?, ?, ?, ?, ?)`)
-      .run(entry.sessionId, parentId, opts.title, opts.kind, new Date().toISOString());
-    for (const pin of this.pins(parentId)) this.pinFile(entry.sessionId, pin);
+      .prepare(`INSERT OR REPLACE INTO session_links(child_id, parent_id, title, kind, created_at, prompt, context_json) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(entry.sessionId, parentId, opts.title, opts.kind, new Date().toISOString(), opts.prompt, JSON.stringify({ ...parts, text: context }));
+    for (const pin of parts.pins) this.pinFile(entry.sessionId, pin);
     const ch = this.channel(entry.sessionId, { cwd, title: opts.title, mode: 'history', sentFromApp: [opts.prompt] });
     ch.useBackground(entry);
     this.awaitTools(ch);
@@ -888,14 +900,113 @@ export class CompanionService {
     }
   }
 
-  /** A fresh session that picks up where this one is, without its long context. */
-  handOff(sessionId: string): Promise<Result<string>> {
+  /** A fresh session that picks up where this one is, without its long context; with a draft, exactly what you edited. */
+  handOff(sessionId: string, draft?: HandoffDraft): Promise<Result<string>> {
+    if (draft) {
+      if (!draft.prompt.trim()) return Promise.resolve({ ok: false, error: 'Give the new chat an opening message.' });
+      return this.branch(sessionId, {
+        kind: draft.kind,
+        title: (draft.title.trim() || 'New chat').slice(0, 80),
+        prompt: draft.prompt.trim(),
+        parts: { notes: draft.notes?.trim() || null, recent: draft.recent?.trim() || null, pins: draft.pins.map((p) => p.path) },
+      });
+    }
     const title = getSession(this.d.db, sessionId)?.title ?? this.channels.get(sessionId)?.state.title ?? 'session';
     return this.branch(sessionId, {
       kind: 'handoff',
       title: `Continued: ${title}`.slice(0, 80),
       prompt: "Let's pick up where we left off. What's the next step?",
     });
+  }
+
+  /** Everything a hand-off would give the new chat, for the preview. */
+  previewHandoff(sessionId: string, kind: HandoffDraft['kind']): Result<HandoffDraft> {
+    this.refresh();
+    const title = getSession(this.d.db, sessionId)?.title ?? this.channels.get(sessionId)?.state.title ?? 'session';
+    return {
+      ok: true,
+      value: {
+        kind,
+        title: kind === 'handoff' ? `Continued: ${title}`.slice(0, 80) : '',
+        prompt: kind === 'handoff' ? "Let's pick up where we left off. What's the next step?" : '',
+        notes: readNotes(this.d.db, sessionId)?.text ?? null,
+        recent: recentExchanges(this.d.db, sessionId) || null,
+        pins: this.pins(sessionId).map((path) => ({ path, label: this.display(sessionId, path) })),
+      },
+    };
+  }
+
+  /** The hand-off record for a chat opened from another, as both of them show it. */
+  handoffRecord(childId: string): HandoffRecord | null {
+    const link = this.d.db
+      .prepare(
+        `SELECT l.child_id, l.parent_id, l.kind, l.created_at, COALESCE(p.title, p.name) AS parent_title, COALESCE(c.title, c.name, l.title) AS child_title
+         FROM session_links l LEFT JOIN sessions p ON p.id = l.parent_id LEFT JOIN sessions c ON c.id = l.child_id WHERE l.child_id = ?`,
+      )
+      .get(childId) as { child_id: string; parent_id: string; kind: string; created_at: string; parent_title: string | null; child_title: string } | undefined;
+    if (!link || link.kind === 'restart') return null;
+    link.parent_title ??= this.channels.get(link.parent_id)?.state.title || 'Earlier chat';
+    const h = readHandoff(this.d.db, childId);
+    const key = this.childKey(childId);
+    return {
+      childId,
+      parentId: link.parent_id,
+      parentTitle: link.parent_title!,
+      childTitle: link.child_title,
+      kind: link.kind,
+      createdAt: link.created_at,
+      prompt: h?.prompt ?? null,
+      parts: h?.parts ?? null,
+      pinLabels: (h?.parts?.pins ?? []).map((p) => this.display(link.parent_id, p)),
+      context: h?.parts?.text ?? (h?.parts
+        ? branchContext({ parentTitle: link.parent_title!, parentId: link.parent_id, kind: link.kind === 'handoff' ? 'handoff' : 'branch', notes: h.parts.notes, recent: h.parts.recent ?? '', pins: h.parts.pins })
+        : null),
+      returns: listReturns(this.d.db, childId).map((r) => ({ id: r.id, version: r.version, status: r.status, sentAt: r.sent_at, outdated: r.state_key !== key })),
+    };
+  }
+
+  private childKey(childId: string): string {
+    const { files, trail } = this.sessionTrail(childId);
+    return childStateKey(files, trail);
+  }
+
+  /** A return package for a child chat: a new version if the child did more since the last one. Sends nothing. */
+  prepareReturn(childId: string): Result<ReturnPackage> {
+    const rec = this.handoffRecord(childId);
+    if (!rec) return { ok: false, error: 'This chat was not opened from another chat.' };
+    const { files, trail } = this.sessionTrail(childId);
+    const lines = this.transcriptLines(childId);
+    const ch = this.channels.get(childId);
+    const body = buildPackage({
+      childId,
+      parentId: rec.parentId,
+      childTitle: rec.childTitle,
+      parentTitle: rec.parentTitle,
+      kind: rec.kind,
+      files,
+      trail,
+      display: (abs) => this.display(childId, abs),
+      disk: diskState,
+      lastReply: lastReply(lines),
+      todos: ch?.state.facts.todos ?? null,
+      childStatus: childStatus(ch?.state.status ?? null, lines),
+      childCwd: this.cwdOf(childId) ? real(this.cwdOf(childId)!) : null,
+      parentCwd: this.cwdOf(rec.parentId) ? real(this.cwdOf(rec.parentId)!) : null,
+    });
+    const row = savePackage(this.d.db, body);
+    this.d.onChanged?.();
+    return { ok: true, value: toPackage(row, body.stateKey) };
+  }
+
+  /** Sends a package to the parent through its normal input (queued while it's busy). Never twice. */
+  async sendReturn(packageId: number, message: string): Promise<Result> {
+    if (!message.trim()) return { ok: false, error: 'Nothing to send.' };
+    const claim = claimForSend(this.d.db, packageId, message.trim());
+    if (!claim.ok) return claim;
+    const r = await this.send(claim.row.parent_id, message.trim());
+    if (!r.ok) unclaim(this.d.db, packageId);
+    this.d.onChanged?.();
+    return r;
   }
 
   // ── Making the new-chat tool available ───────────────────────────────────────────────────────
@@ -1220,9 +1331,16 @@ export class CompanionService {
          LEFT JOIN sessions s ON s.id = l.parent_id WHERE l.child_id = ?`,
       )
       .get(sessionId) as { id: string; title: string; kind: string } | undefined;
-    const children = this.d.db
-      .prepare(`SELECT child_id AS id, title, kind FROM session_links WHERE parent_id = ? ORDER BY created_at`)
-      .all(sessionId) as { id: string; title: string; kind: string }[];
+    const children = (
+      this.d.db.prepare(`SELECT child_id AS id, title, kind FROM session_links WHERE parent_id = ? ORDER BY created_at`).all(sessionId) as {
+        id: string;
+        title: string;
+        kind: string;
+      }[]
+    ).map((c) => {
+      const last = listReturns(this.d.db, c.id).at(-1);
+      return { ...c, returned: last ? { version: last.version, status: last.status, outdated: last.state_key !== this.childKey(c.id) } : null };
+    });
     return {
       toolsEverywhere: this.toolsInstalledEverywhere(),
       notes: notes ? { path: notes.path, updatedAt: notes.updatedAt, behind: notesBehind(this.d.db, sessionId), preview: notes.text.slice(0, 1200) } : null,
@@ -1233,6 +1351,7 @@ export class CompanionService {
       context: this.context?.get(sessionId, this.cwdOf(sessionId)) ?? null,
       changes: this.sessionChanges(sessionId, 2000).map((f) => ({ path: this.display(sessionId, f.abs), abs: f.abs, added: f.added, removed: f.removed })),
       heavy: this.heavy(sessionId),
+      handoff: this.handoffRecord(sessionId),
     };
   }
 
@@ -1411,6 +1530,32 @@ function readText(path: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** The chat's last reply, from its transcript. */
+function lastReply(lines: string[]): { id: string; text: string } | null {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let rec: any;
+    try {
+      rec = JSON.parse(lines[i]!);
+    } catch {
+      continue;
+    }
+    if (rec?.type !== 'assistant' || rec.isSidechain || !Array.isArray(rec.message?.content)) continue;
+    const text = rec.message.content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('\n').trim();
+    if (text) return { id: rec.uuid, text };
+  }
+  return null;
+}
+
+/** Where a child chat stands: still working, waiting on you, done for now, ended, or interrupted. */
+function childStatus(status: SessionState['status'] | null, lines: string[]): ReturnPackage['childStatus'] {
+  if (status === 'busy' || status === 'starting') return 'working';
+  if (status === 'waiting') return 'waiting';
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 6); i--) {
+    if (/\[Request interrupted/.test(lines[i]!)) return 'interrupted';
+  }
+  return status === 'idle' ? 'idle' : 'ended';
 }
 
 /** Whether a changed file is still as the session left it. Unknown (rebuilt edits) counts as the same. */

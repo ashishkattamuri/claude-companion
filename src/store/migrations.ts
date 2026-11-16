@@ -261,4 +261,24 @@ export const MIGRATIONS: string[] = [
   -- Side chats about a change: the hunk or file asked about, frozen as it was (diff, source step, time).
   ALTER TABLE side_chats ADD COLUMN change_json TEXT;
   `,
+  `
+  -- What a chat opened from another was given (its opening message and background), for the hand-off card.
+  ALTER TABLE session_links ADD COLUMN prompt TEXT;
+  ALTER TABLE session_links ADD COLUMN context_json TEXT;
+
+  -- Return packages: what a child chat did, prepared for its parent. Versioned; each is sent at most once.
+  CREATE TABLE handoff_returns (
+    id           INTEGER PRIMARY KEY,
+    child_id     TEXT NOT NULL,
+    parent_id    TEXT NOT NULL,
+    version      INTEGER NOT NULL,
+    state_key    TEXT NOT NULL,    -- the child's transcript and changes when it was prepared
+    package_json TEXT NOT NULL,
+    message      TEXT,             -- what was sent, as you edited it
+    status       TEXT NOT NULL,    -- draft | sent
+    created_at   TEXT NOT NULL,
+    sent_at      TEXT,
+    UNIQUE (child_id, version)
+  );
+  `,
 ];

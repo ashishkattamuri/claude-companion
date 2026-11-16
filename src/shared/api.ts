@@ -109,8 +109,10 @@ export interface SessionExtras {
   pins: { path: string; label: string }[];
   /** The chat this one was opened from. */
   parent: { id: string; title: string; kind: string } | null;
-  /** Chats opened from this one. */
-  children: { id: string; title: string; kind: string }[];
+  /** Chats opened from this one, and where each one's return stands. */
+  children: { id: string; title: string; kind: string; returned: { version: number; status: 'draft' | 'sent'; outdated: boolean } | null }[];
+  /** For a chat opened from another: what it was given, and its return packages. */
+  handoff: HandoffRecord | null;
   /** What fills the context window, from Claude Code's `/context`; null until first read. */
   context: ContextBreakdown | null;
   /** Files the session changed, with each file's net +/− over the session (the same as the review). */
@@ -229,6 +231,77 @@ export interface ReviewView {
 export interface ContextBreakdown {
   categories: { name: string; tokens: number }[];
   autocompact: number;
+}
+
+/** The background a chat opened from another was given, exactly as supplied. */
+export interface HandoffParts {
+  notes: string | null;
+  /** The parent's last exchanges, word for word, when included. */
+  recent: string | null;
+  /** Pinned files (absolute paths) the new chat was told to read. */
+  pins: string[];
+  /** Opened from the preview, where you could edit all of this. */
+  previewed: boolean;
+  /** The full background text Claude was given. */
+  text?: string;
+}
+
+/** A hand-off before it starts: everything the new chat will be given, for you to edit. */
+export interface HandoffDraft {
+  kind: 'branch' | 'handoff';
+  title: string;
+  /** The opening message: the goal. */
+  prompt: string;
+  notes: string | null;
+  recent: string | null;
+  pins: { path: string; label: string }[];
+}
+
+/** The same record from either side: what the child was given and what came back. */
+export interface HandoffRecord {
+  childId: string;
+  parentId: string;
+  parentTitle: string;
+  childTitle: string;
+  kind: string;
+  createdAt: string;
+  prompt: string | null;
+  /** null for chats opened before hand-offs were recorded. */
+  parts: HandoffParts | null;
+  pinLabels: string[];
+  /** The full text given to the child, as Claude got it. */
+  context: string | null;
+  returns: { id: number; version: number; status: 'draft' | 'sent'; sentAt: string | null; outdated: boolean }[];
+}
+
+/** What a child chat did, prepared for its parent. Facts from the transcript; the outcome is the child's claim. */
+export interface ReturnPackage {
+  id: number;
+  version: number;
+  childId: string;
+  parentId: string;
+  childTitle: string;
+  parentTitle: string;
+  stateKey: string;
+  createdAt: string;
+  status: 'draft' | 'sent';
+  sentAt: string | null;
+  /** The child did more since this version was prepared. */
+  outdated: boolean;
+  childStatus: 'working' | 'waiting' | 'idle' | 'ended' | 'interrupted';
+  /** The child's last reply, in its own words. */
+  outcome: { id: string; text: string } | null;
+  remaining: string[];
+  changes: { path: string; added: number; removed: number; disk: 'same' | 'changed' | 'missing'; verified: Verification['state'] }[];
+  /** Where the child's changes are: in the parent's folder already, or elsewhere (a worktree). */
+  workspace: { child: string | null; parent: string | null; same: boolean };
+  /** What the child said as it made its edits, with the step. */
+  decisions: { text: string; stepId: string }[];
+  verification: { command: string; outcome: TestRun['outcome']; summary: string | null; stepId: string; stale: boolean }[];
+  concerns: string[];
+  suggestion: string;
+  /** The message to send: the default composition, or what was sent. */
+  message: string;
 }
 
 /** Tokens and cost of one side-chat answer. `cached` is the chat's history read back from the prompt cache. */
@@ -350,8 +423,15 @@ export interface CompanionApi {
   getExtras(sessionId: string): Promise<SessionExtras>;
   /** Runs /compact, keeping pinned files and the optional focus. */
   compact(sessionId: string, focus: string): Promise<Result>;
-  /** Opens a fresh session that picks up from this one's notes. */
-  handOff(sessionId: string): Promise<Result<string>>;
+  /** Opens a fresh session that picks up from this one's notes; with a draft, exactly what you edited. */
+  handOff(sessionId: string, draft?: HandoffDraft): Promise<Result<string>>;
+  /** What a hand-off from this chat would give the new chat, to edit before it starts. */
+  previewHandoff(sessionId: string, kind: HandoffDraft['kind']): Promise<Result<HandoffDraft>>;
+  getHandoff(childId: string): Promise<HandoffRecord | null>;
+  /** Prepares (or reuses, if nothing changed) a return package for a child chat. Sends nothing. */
+  prepareReturn(childId: string): Promise<Result<ReturnPackage>>;
+  /** Sends a package's message to the parent chat (queued if it's busy). Each version is sent once. */
+  sendReturn(packageId: number, message: string): Promise<Result>;
   pickFile(sessionId: string): Promise<string | null>;
   pinFile(sessionId: string, path: string): Promise<void>;
   unpinFile(sessionId: string, path: string): Promise<void>;

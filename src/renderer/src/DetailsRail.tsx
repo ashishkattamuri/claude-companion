@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import type { ContextBreakdown, ConversationItem, SessionExtras, SessionState } from '../../shared/api';
+import type { ContextBreakdown, ConversationItem, HandoffRecord, SessionExtras, SessionState } from '../../shared/api';
 import { contextWindowFor } from '../../shared/contextWindow';
 import { api } from './api';
 import { CacheLine } from './CacheStatus';
+import { HandoffDetails, HandoffSheet, ReturnSheet, returnLabel } from './Handoff';
 import { timeAgo } from './format';
 import { describeTool } from './turns';
 
@@ -111,6 +112,7 @@ export function DetailsRail({ state, items, extras, onNavigate, onError, onRevie
   const [focus, setFocus] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [showNotes, setShowNotes] = useState(false);
+  const [sheet, setSheet] = useState<'handoff' | 'return' | null>(null);
   const canAct = state.mode !== 'mirror';
 
   // Each file's net change over the session, as the review shows it; until that arrives, the edits summed.
@@ -232,6 +234,9 @@ export function DetailsRail({ state, items, extras, onNavigate, onError, onRevie
               >
                 {busy === 'handoff' ? 'Opening…' : 'Hand off to a fresh session'}
               </button>
+              <button className="link" onClick={() => setSheet('handoff')} title="See and edit everything the new chat will be given before it opens">
+                Preview hand-off…
+              </button>
             </div>
           </div>
         )}
@@ -320,13 +325,30 @@ export function DetailsRail({ state, items, extras, onNavigate, onError, onRevie
         ))}
       </section>
 
+      {extras?.handoff && (
+        <section className="handoff-card" aria-label="Hand-off">
+          <h2>{extras.handoff.kind === 'handoff' ? 'Handed off' : 'Branched'} from “{extras.handoff.parentTitle}”</h2>
+          <p className="muted small">{timeAgo(extras.handoff.createdAt)}</p>
+          <HandoffDetails rec={extras.handoff} />
+          <div className="handoff-return">
+            {extras.handoff.returns.length > 0 && (
+              <p className="small">
+                {returnLabel({ ...extras.handoff.returns.at(-1)!, outdated: extras.handoff.returns.at(-1)!.outdated })}
+                {extras.handoff.returns.some((r) => r.status === 'sent') && extras.handoff.returns.at(-1)!.status === 'draft' ? ' · revised' : ''}
+              </p>
+            )}
+            <button className="btn small" onClick={() => setSheet('return')} title="Choose what goes back to the original chat; nothing is sent until you send it">
+              Return to “{extras.handoff.parentTitle}”…
+            </button>
+          </div>
+        </section>
+      )}
+
       {extras && extras.children.length > 0 && (
         <section>
           <h2>Chats opened from here</h2>
           {extras.children.map((c) => (
-            <button key={c.id} className="child-link" onClick={() => onNavigate(c.id)}>
-              → {c.title}
-            </button>
+            <ChildRow key={c.id} child={c} onNavigate={onNavigate} />
           ))}
         </section>
       )}
@@ -360,6 +382,44 @@ export function DetailsRail({ state, items, extras, onNavigate, onError, onRevie
           </span>
         </div>
       </section>
+      {sheet === 'handoff' && <HandoffSheet sessionId={sessionId} onDone={() => setSheet(null)} onCancel={() => setSheet(null)} onError={onError} />}
+      {sheet === 'return' && (
+        <ReturnSheet
+          childId={sessionId}
+          onClose={() => setSheet(null)}
+          onError={onError}
+          onSent={(parentId) => {
+            setSheet(null);
+            onNavigate(parentId);
+          }}
+        />
+      )}
     </aside>
+  );
+}
+
+/** A chat opened from this one: its return status, and what it was given (the same record it shows). */
+function ChildRow({ child: c, onNavigate }: { child: SessionExtras['children'][number]; onNavigate: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [rec, setRec] = useState<HandoffRecord | null>(null);
+  useEffect(() => {
+    if (open) void api.getHandoff(c.id).then(setRec);
+  }, [open, c.id, c.returned?.version, c.returned?.status]);
+  const label = returnLabel(c.returned);
+  return (
+    <div className="child-row">
+      <div className="child-row-head">
+        <button className="child-link" onClick={() => onNavigate(c.id)}>
+          → {c.title}
+        </button>
+        {c.kind !== 'restart' && (
+          <button className="link small" aria-expanded={open} onClick={() => setOpen(!open)} title="What it was given and what came back">
+            {open ? 'Less' : 'Hand-off'}
+          </button>
+        )}
+      </div>
+      {label && <span className={`vchip ${c.returned!.status === 'sent' && !c.returned!.outdated ? 'green' : 'amber'} child-return`}>{label}</span>}
+      {open && rec && <HandoffDetails rec={rec} />}
+    </div>
   );
 }

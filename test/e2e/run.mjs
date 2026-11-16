@@ -401,6 +401,54 @@ try {
   check('…and the pinned file carried over', await until(async () => (await page.locator('.rail').innerText()).includes('notes.md')));
   await page.screenshot({ path: join(shots, '5-context-tools.png') });
 
+  // The hand-off card: what the new chat was given, and a return package for the original chat.
+  {
+    const rail = page.locator('.rail');
+    const card = rail.locator('.handoff-card');
+    check('the new chat shows what it was handed', await until(async () => (await card.innerText()).includes('Handed off from') && (await card.innerText()).includes('Given automatically')));
+    check('…the goal and the pinned file it was given', (await card.innerText()).includes("Let's pick up where we left off") && (await card.innerText()).includes('notes.md'));
+    await card.getByRole('button', { name: 'Show exactly what was supplied' }).click();
+    check('…and exactly what was supplied', (await card.locator('pre').innerText()).includes('<pinned_files>'));
+    await card.getByRole('button', { name: /Return to/ }).click();
+    const sheet = page.locator('.return-sheet');
+    check('a return package collects what the chat did, sending nothing yet', await until(async () => (await sheet.locator('textarea').inputValue()).includes('Back from the chat')));
+    check('…with the outcome as its claim, and no tests as not verified', (await sheet.locator('textarea').inputValue()).includes('a claim, not verified') && (await sheet.locator('textarea').inputValue()).includes('Verification: not verified'));
+    await sheet.getByRole('checkbox', { name: /Suggested next step/ }).uncheck();
+    check('leaving a section out takes it out of the message', !(await sheet.locator('textarea').inputValue()).includes('Suggested next step'));
+    await page.screenshot({ path: join(shots, '5b-return-package.png') });
+    await sheet.getByRole('button', { name: 'Send to the original chat' }).click();
+    check('sending it delivers it to the original chat and switches there', await until(async () => (await thread()).includes('Back from the chat "Continued:')));
+    check('…which lists the return on the chat it came from', await until(async () => (await rail.locator('.child-row', { hasText: 'Continued:' }).innerText()).includes('Returned v1')));
+    await rail.locator('.child-row', { hasText: 'Continued:' }).getByRole('button', { name: 'Hand-off' }).click();
+    check('…with the same hand-off record as the new chat shows', await until(async () => (await rail.locator('.child-row', { hasText: 'Continued:' }).innerText()).includes('Given automatically')));
+    const parentFile = readdirSync(join(claudeDir, 'projects')).map((d) => join(claudeDir, 'projects', d, `${parentId}.jsonl`)).find(existsSync);
+    const sends = () => readFileSync(parentFile, 'utf8').split('\n').filter((l) => l.includes('"type":"user"') && l.includes('Back from the chat')).length;
+    await rail.locator('.child-row', { hasText: 'Continued:' }).locator('.child-link').click();
+    await page.locator('.handoff-card').getByRole('button', { name: /Return to/ }).click();
+    check('reopening shows it as sent, with nothing to send again', await until(async () => (await sheet.innerText()).includes('Sent')) && (await sheet.getByRole('button', { name: 'Send to the original chat' }).count()) === 0);
+    check('…and the original chat got it once', sends() === 1);
+    await sheet.getByRole('button', { name: 'Close' }).click();
+
+    // Preview a hand-off: edit what the new chat is given before it opens.
+    await page.locator('.from-link').click();
+    await rail.getByRole('button', { name: 'Preview hand-off…' }).click();
+    const preview = page.locator('.handoff-sheet');
+    await until(async () => (await preview.count()) === 1);
+    await preview.getByRole('radio', { name: 'Separate topic' }).click();
+    const titleBox = preview.getByPlaceholder('What the new chat is for');
+    await until(async () => (await titleBox.inputValue()) === '');
+    await titleBox.fill('Try a cache');
+    await preview.locator('textarea').first().fill('sketch a cache layer');
+    await preview.locator('textarea').nth(1).fill('Decided: keep the API shape. Open question: TTL?');
+    await page.screenshot({ path: join(shots, '5c-handoff-preview.png') });
+    await preview.getByRole('button', { name: 'Open the new chat' }).click();
+    check('the previewed hand-off opens a new chat on the edited goal', await until(async () => (await page.locator('.head h1').innerText()) === 'Try a cache' && (await thread()).includes('echo: sketch a cache layer')));
+    check('…and records that it was edited, with the notes as written', await until(async () => (await page.locator('.handoff-card').innerText()).includes('Edited in the preview')));
+    await page.locator('.handoff-card').getByRole('button', { name: 'Show exactly what was supplied' }).click();
+    check('…exactly as supplied', (await page.locator('.handoff-card pre').innerText()).includes('Open question: TTL?'));
+    await page.locator('.from-link').click();
+  }
+
   // Cleaning up the sidebar: hide a chat and bring it back, then delete two together.
   const row = (title) => page.locator('.s-row', { hasText: title });
   await row('Old experiment A').click({ button: 'right' });
