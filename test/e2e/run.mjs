@@ -33,6 +33,18 @@ for (const [i, id] of OLD.entries())
     join(fixtureDir, `${id}.jsonl`),
     readFileSync(join(fixtureDir, `${SESSION}.jsonl`), 'utf8').replaceAll(SESSION, id).replaceAll('Webhook retry logic', `Old experiment ${'AB'[i]}`),
   );
+// Three recent chats that each correct npm to pnpm, for setup suggestions.
+const PNPM = ['cccccccc-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-000000000002', 'cccccccc-0000-0000-0000-000000000003'];
+for (const [i, id] of PNPM.entries()) {
+  const ts = (s) => new Date(Date.now() - (3 - i) * 3_600_000 + s * 1000).toISOString();
+  const base = { sessionId: id, cwd: project, isSidechain: false, userType: 'external', version: '2.1.286' };
+  const recs = [
+    { type: 'user', uuid: `${id}-1`, parentUuid: null, timestamp: ts(0), message: { role: 'user', content: ['Add a docs build', 'Fix the flaky date test', 'Write release notes'][i] } },
+    { type: 'assistant', uuid: `${id}-2`, parentUuid: `${id}-1`, timestamp: ts(5), message: { id: `m${i}`, role: 'assistant', model: 'claude-fake-1', content: [{ type: 'text', text: 'Running npm install first.' }] } },
+    { type: 'user', uuid: `${id}-3`, parentUuid: `${id}-2`, timestamp: ts(9), message: { role: 'user', content: ['No, use pnpm, not npm.', "Don't use npm here, use pnpm.", 'Actually use pnpm, not npm, in this repo.'][i] } },
+  ];
+  writeFileSync(join(fixtureDir, `${id}.jsonl`), recs.map((r) => JSON.stringify({ ...base, ...r })).join('\n') + '\n');
+}
 
 // The project is a GitHub repository, and Claude Code has one MCP server Companion has no use for.
 // Installing the (fake) GitHub plugin brings a fake GitHub MCP server.
@@ -491,6 +503,32 @@ try {
     globalThis.dialogs = [];
     dialog.showMessageBox = async (_w, o) => (globalThis.dialogs.push(o.message), { response: 0, checkboxChecked: false }); // confirm
   });
+  // Setup suggestions: a correction repeated across chats becomes a CLAUDE.md addition you can apply and undo.
+  {
+    await page.locator('.nav button', { hasText: 'Setup' }).click();
+    const setup = page.locator('.setup-page');
+    check('Setup suggestions opens on a project, with nothing suggested yet', await until(async () => (await setup.innerText()).includes('No suggestions yet')));
+    await setup.getByRole('button', { name: 'Review my setup' }).click();
+    check('…and says what a review reads before it runs', (await setup.locator('.setup-confirm').innerText()).includes('Nothing is written'));
+    await setup.locator('.setup-confirm').getByRole('button', { name: 'Review' }).click();
+    const sug = setup.locator('.setup-card').first();
+    check('a correction repeated in three chats becomes a CLAUDE.md suggestion', await until(async () => (await sug.innerText()).includes('Use pnpm, not npm.') && (await setup.locator('.setup-group h2').first().innerText()).includes('CLAUDE.md')));
+    check('…with links to all three chats', (await sug.locator('.setup-evidence li').count()) === 3 && (await sug.innerText()).includes('in 3 sessions'));
+    check('…shown as an addition, with nothing written yet', (await sug.locator('.setup-diff .add').count()) >= 1 && (await sug.locator('.setup-diff .del').count()) === 0 && !existsSync(join(project, 'CLAUDE.md')));
+    await page.screenshot({ path: join(shots, '9-setup.png') });
+    await sug.getByRole('button', { name: 'Apply' }).click();
+    check('Apply writes it into the file', await until(async () => existsSync(join(project, 'CLAUDE.md')) && readFileSync(join(project, 'CLAUDE.md'), 'utf8').includes('Use pnpm, not npm.')));
+    check('…and then counts whether it recurs', await until(async () => (await sug.locator('.setup-since').innerText()).includes('happened 0 times (was 3')));
+    await sug.getByRole('button', { name: 'Undo' }).click();
+    check('Undo takes it back out', await until(async () => !existsSync(join(project, 'CLAUDE.md'))));
+    await until(async () => (await sug.getByRole('button', { name: 'Dismiss' }).count()) === 1);
+    await sug.getByRole('button', { name: 'Dismiss' }).click();
+    check('a dismissed suggestion leaves the page', await until(async () => (await setup.locator('.setup-card').count()) === 0));
+    await setup.getByRole('button', { name: 'Review my setup' }).click();
+    await setup.locator('.setup-confirm').getByRole('button', { name: 'Review' }).click();
+    check('…and is not suggested again on the next review', await until(async () => (await setup.innerText()).includes('0 new suggestions')) && (await setup.locator('.setup-card').count()) === 0);
+  }
+
   const dialogs = () => app.evaluate(() => globalThis.dialogs);
   const nav = (label) => page.locator('.nav button', { hasText: label }).click();
   const cards = page.locator('.plugin-card');

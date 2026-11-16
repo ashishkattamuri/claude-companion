@@ -304,6 +304,50 @@ export interface ReturnPackage {
   message: string;
 }
 
+/** Something in a recent session that a setup suggestion rests on, with where it happened. */
+export interface SetupEvidence {
+  id: number;
+  kind: 'correction' | 'denied' | 'repeated' | 'reverted' | 'skill';
+  sessionId: string;
+  sessionTitle: string;
+  itemId: string;
+  ts: string;
+  text: string;
+  /** For a denial, the narrowest rule naming it; for a skill, its name; for an undone edit, the file. */
+  pattern: string | null;
+}
+
+/** A proposed edit to your Claude Code setup. Never applied without Apply. */
+export interface SetupSuggestion {
+  id: number;
+  targetPath: string;
+  targetLabel: string;
+  kind: 'append' | 'insert_after' | 'allow' | 'deny';
+  text: string;
+  /** The edit as a unified diff against the file when it was proposed. */
+  diff: string;
+  why: string;
+  evidence: SetupEvidence[];
+  status: 'new' | 'applied' | 'dismissed';
+  createdAt: string;
+  appliedAt: string | null;
+  /** How often it happened in the window it was found in, and in how many sessions. */
+  impact: { times: number; sessions: number };
+  /** After Apply: how often the pattern came back, against how often before. */
+  since: { after: number; before: number; notWorking: boolean } | null;
+}
+
+export interface SetupView {
+  projects: { cwd: string; name: string; optedOut: boolean }[];
+  cwd: string | null;
+  suggestions: SetupSuggestion[];
+  running: boolean;
+  lastRun: { at: string; evidence: number; found: number; error: string | null } | null;
+  /** What a review reads: days back, and the sessions in that window. */
+  window: { days: number; sessions: number };
+  model: string;
+}
+
 /** Tokens and cost of one side-chat answer. `cached` is the chat's history read back from the prompt cache. */
 export interface SideUsage {
   fresh: number;
@@ -488,6 +532,18 @@ export interface CompanionApi {
   pluginConfig(id: string): Promise<Result<PluginConfig>>;
   /** Saves option values; returns the ones saved. */
   savePluginConfig(id: string, values: Record<string, string>): Promise<Result<string[]>>;
+
+  /** Setup suggestions for a project (the most recent one if none is given). */
+  getSetup(cwd: string | null): Promise<SetupView>;
+  /** Reads the project's recent sessions and proposes setup edits. Resolves when done. */
+  runSetupReview(cwd: string): Promise<Result<number>>;
+  /** Writes a suggestion into its file, keeping a .bak copy. */
+  applySuggestion(id: number): Promise<Result>;
+  /** Takes an applied suggestion back out of its file. */
+  undoSuggestion(id: number): Promise<Result>;
+  dismissSuggestion(id: number): Promise<void>;
+  /** Changes a suggestion's text before applying it. */
+  editSuggestion(id: number, text: string): Promise<Result>;
 
   /** MCP servers from Claude Code's settings and from enabled plugins. */
   listServers(): Promise<ServerView[]>;

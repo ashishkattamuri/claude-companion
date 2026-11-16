@@ -2,7 +2,7 @@ import { useEffect, useState, type MouseEvent } from 'react';
 import type { SessionListItem } from '../../shared/api';
 import { shortPath, timeAgo } from './format';
 
-export type Page = 'today' | 'ideas' | 'goals' | 'feed' | 'connectors';
+export type Page = 'today' | 'ideas' | 'goals' | 'feed' | 'connectors' | 'setup';
 
 const PAGES: { id: Page; label: string; icon: string }[] = [
   { id: 'today', label: 'Today', icon: 'M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zM8 5v3l2 1.5' },
@@ -10,6 +10,7 @@ const PAGES: { id: Page; label: string; icon: string }[] = [
   { id: 'goals', label: 'Goals', icon: 'M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zM8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z' },
   { id: 'feed', label: 'Feed', icon: 'M3 4h10M3 8h10M3 12h6' },
   { id: 'connectors', label: 'Connectors', icon: 'M6 3v3M10 3v3M4.5 6h7v2.5a3.5 3.5 0 0 1-7 0zM8 12v2' },
+  { id: 'setup', label: 'Setup', icon: 'M3 4.5h6M11 4.5h2M3 11.5h2M7 11.5h6M9 3v3M5 10v3' },
 ];
 
 interface Props {

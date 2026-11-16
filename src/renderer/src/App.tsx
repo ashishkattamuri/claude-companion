@@ -4,13 +4,14 @@ import { api } from './api';
 import { ConnectorsPage, type ConnectorsTab } from './ConnectorsPage';
 import { NewSessionSheet } from './NewSessionSheet';
 import { SessionWorkspace, type View } from './SessionWorkspace';
+import { SetupSuggestionsPage } from './SetupSuggestions';
 import { Sidebar, type Page } from './Sidebar';
 import { sessions as store } from './store';
 import { TodayView } from './TodayView';
 
-type Selection = { kind: 'page'; page: Page } | { kind: 'session'; id: string; draft?: string; view?: View };
+type Selection = { kind: 'page'; page: Page } | { kind: 'session'; id: string; draft?: string; view?: View; focus?: string };
 
-const SOON: Record<Exclude<Page, 'today' | 'connectors'>, { title: string; text: string }> = {
+const SOON: Record<Exclude<Page, 'today' | 'connectors' | 'setup'>, { title: string; text: string }> = {
   ideas: { title: 'Ideas', text: 'Follow-ups and directions from your conversations, ready to run in one click.' },
   goals: { title: 'Goals', text: 'Long-running goals checked on a schedule that report back only when something changes.' },
   feed: { title: 'Feed', text: 'News related to what you are working on.' },
@@ -117,10 +118,11 @@ export function App() {
       <main className="content">
         {selection.kind === 'session' && (
           <SessionWorkspace
-            key={`${selection.id}:${selection.view ?? ''}`}
+            key={`${selection.id}:${selection.view ?? ''}:${selection.focus ?? ''}`}
             sessionId={selection.id}
             draft={selection.draft}
             initialView={selection.view}
+            initialFocus={selection.focus}
             onError={setToast}
             onNavigate={(id) => setSelection({ kind: 'session', id })}
           />
@@ -138,7 +140,10 @@ export function App() {
           />
         )}
         {selection.kind === 'page' && selection.page === 'connectors' && <ConnectorsPage initial={connectorsAt} onError={setToast} />}
-        {selection.kind === 'page' && selection.page !== 'today' && selection.page !== 'connectors' && (
+        {selection.kind === 'page' && selection.page === 'setup' && (
+          <SetupSuggestionsPage onOpen={(id, itemId) => setSelection({ kind: 'session', id, focus: itemId })} onError={setToast} />
+        )}
+        {selection.kind === 'page' && selection.page !== 'today' && selection.page !== 'connectors' && selection.page !== 'setup' && (
           <div className="page">
             <div className="empty">
               <h2>{SOON[selection.page].title}</h2>

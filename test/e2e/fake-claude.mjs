@@ -53,6 +53,10 @@ async function print(args, prompt) {
       lean_calls: 1,
       notes: '',
     };
+  } else if (schema.properties?.suggestions) {
+    // Setup suggestions: one CLAUDE.md addition resting on every pnpm correction, unless dismissed.
+    const ids = [...prompt.matchAll(/^#(\d+) correction .*pnpm/gm)].map((m) => Number(m[1]));
+    out = { suggestions: ids.length ? [{ target: 'project-claude-md', kind: 'append', anchor: '', text: 'Use pnpm, not npm.', why: 'You corrected npm to pnpm in three chats.', evidence: ids, match: ['pnpm'] }] : [] };
   } else if (schema.properties?.behaviors) {
     // The review overview: code files are one behavior, docs another; it answers request 1.
     const paths = [...prompt.matchAll(/<file path="([^"]+)"/g)].map((m) => m[1]);

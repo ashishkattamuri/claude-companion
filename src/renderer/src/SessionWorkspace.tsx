@@ -26,12 +26,15 @@ export function SessionWorkspace({
   sessionId,
   draft,
   initialView,
+  initialFocus,
   onError,
   onNavigate,
 }: {
   sessionId: string;
   draft?: string;
   initialView?: View;
+  /** A conversation item to show when it opens. */
+  initialFocus?: string;
   onError: (m: string) => void;
   onNavigate: (sessionId: string) => void;
 }) {
@@ -40,7 +43,7 @@ export function SessionWorkspace({
   const audit = useAudit(sessionId);
   const [mode, setMode] = useState<View>(initialView ?? 'conversation');
   const review = useReview(sessionId, mode === 'review');
-  const [focus, setFocus] = useState<{ id: string; at: number } | null>(null);
+  const [focus, setFocus] = useState<{ id: string; at: number } | null>(initialFocus ? { id: initialFocus, at: Date.now() } : null);
   const [rail, setRail] = useState(true);
   const [compose, setCompose] = useState<{ text: string; at: number } | null>(draft ? { text: draft, at: 0 } : null);
   const sideChats = useSideChats(sessionId);

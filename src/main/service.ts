@@ -71,6 +71,7 @@ import { findBackground, startBackground, stopBackground } from './background.js
 import { branchContext } from './branch.js';
 import { ContextUsage } from './context-usage.js';
 import { SessionChannel, type ChannelDeps, type ChannelInfo } from './session.js';
+import { SetupSuggestions } from './setup.js';
 import { SideChats } from './side-chat.js';
 import { openInTerminalApp } from './terminal-app.js';
 import { findTranscript } from './transcript.js';
@@ -146,6 +147,7 @@ export class CompanionService {
   private overviewing = new Map<string, Promise<void>>();
   private overviewErrors = new Map<string, string>();
   private context: ContextUsage | null = null;
+  readonly setup: SetupSuggestions;
 
   constructor(private d: ServiceDeps) {
     this.plugins = new PluginCli(d.claudeBin ?? process.env.COMPANION_CLAUDE_BIN ?? 'claude', d.env);
@@ -155,6 +157,7 @@ export class CompanionService {
         env: d.env,
         onChanged: () => d.onChanged?.(),
       });
+    this.setup = new SetupSuggestions({ db: d.db, cfg: d.cfg, llm: d.llm, onChanged: () => d.onChanged?.() });
     this.side = new SideChats({
       db: d.db,
       projectsDir: d.cfg.projectsDir,

@@ -281,4 +281,37 @@ export const MIGRATIONS: string[] = [
     UNIQUE (child_id, version)
   );
   `,
+  `
+  -- Setup suggestions: additive edits to CLAUDE.md, skills and permission settings, from repeated friction.
+  CREATE TABLE setup_suggestions (
+    id            INTEGER PRIMARY KEY,
+    project_cwd   TEXT NOT NULL,
+    target_path   TEXT NOT NULL,
+    target_label  TEXT NOT NULL,
+    target_kind   TEXT NOT NULL,   -- markdown | settings
+    kind          TEXT NOT NULL,   -- append | insert_after | allow | deny
+    anchor        TEXT,
+    text          TEXT NOT NULL,
+    diff          TEXT NOT NULL,
+    why           TEXT NOT NULL,
+    evidence_json TEXT NOT NULL,
+    match_json    TEXT NOT NULL,
+    key           TEXT NOT NULL,
+    status        TEXT NOT NULL,   -- new | applied | dismissed
+    created_at    TEXT NOT NULL,
+    applied_at    TEXT,
+    applied_hash  TEXT,            -- the file as Apply left it, so Undo knows it's unchanged since
+    backup_path   TEXT,            -- the .bak copy; null when Apply created the file
+    before_count  INTEGER NOT NULL
+  );
+  CREATE INDEX setup_suggestions_project ON setup_suggestions(project_cwd);
+
+  CREATE TABLE setup_runs (
+    project_cwd  TEXT PRIMARY KEY,
+    ran_at       TEXT NOT NULL,
+    evidence     INTEGER NOT NULL,
+    found        INTEGER NOT NULL,
+    error        TEXT
+  );
+  `,
 ];

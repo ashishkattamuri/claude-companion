@@ -35,6 +35,8 @@ const ConfigSchema = z.object({
       review: z.string().default('haiku'),
       // Empty: one tier above the model the audited session used.
       audit: z.string().default(''),
+      // Proposes CLAUDE.md, skill and permission edits from repeated friction.
+      setup: z.string().default('sonnet'),
     })
     .prefault({}),
   limits: z
