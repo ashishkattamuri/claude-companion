@@ -3,6 +3,7 @@
  * Type-only: the renderer imports nothing from the backend at runtime.
  */
 import type { ConversationItem, PatchHunk, SessionFacts, ToolResult } from '../adapter/conversation.js';
+import type { TestRun, TrailFailure, TrailRequest, Verification } from '../adapter/trail.js';
 import type { AuditView } from '../analyze/audit/view.js';
 import type { HeavyItem } from '../analyze/heavy.js';
 import type { RecapRow } from '../analyze/recap.js';
@@ -18,6 +19,7 @@ export type { ConversationItem, PatchHunk, SessionFacts, ToolResult, ProjectRow,
 export type { ServerView, RecapSource, GitHubActivity, GitHubItem, ServerConfig };
 export type { ActionResult, CatalogPlugin, MarketplaceAction, PluginAction, PluginCatalog, PluginConfig };
 export type { AuditView, HeavyItem };
+export type { TestRun, TrailFailure, TrailRequest, Verification };
 export type { AuditFindingView, AuditStepRef } from '../analyze/audit/view.js';
 
 /** A session's latest audit, whether one is running, and how far the session has moved on since. */
@@ -152,6 +154,46 @@ export interface ReviewFile {
   stepNotes: (string | null)[];
   /** Identifies this exact change; explanations are cached by it. */
   hash: string;
+  /** When each step ran, and the conversation ids of the requests that led to them. */
+  stepTs: string[];
+  requestIds: string[];
+  /** Where the file was last edited in the transcript, to order it against test runs. */
+  lastSeq: number | null;
+  /** Test evidence after the file's last edit (a test ran and how it came out; not what it covered). */
+  verification: Verification;
+  /**
+   * Your explicit review of the file, kept apart from merely having seen it: reviewed, never
+   * reviewed, or reviewed and changed since (`changedHunks` are the hunks to look at again).
+   */
+  review: { state: 'unreviewed' | 'reviewed' | 'changed'; at: string | null; changedHunks: number[] };
+}
+
+/** A behavior the session's changes add or alter, with the files that make it up. */
+export interface ReviewBehavior {
+  id: string;
+  title: string;
+  summary: string;
+  why: string | null;
+  /** Paths as in ReviewFile.path; only files the session actually changed. */
+  files: string[];
+  /** The requests it answers (conversation ids). */
+  requestIds: string[];
+  /** The model's judgment from the diff; null when nothing judged it. */
+  risk: 'low' | 'medium' | 'high' | null;
+  riskReason: string | null;
+}
+
+/** The changes grouped by behavior, and what was implemented against what was asked. Inferred by a model. */
+export interface ReviewOverview {
+  /** The set of changes it was written for. */
+  key: string;
+  implemented: string | null;
+  behaviors: ReviewBehavior[];
+  /** Where the changes go beyond, fall short of, or differ from the requests. */
+  deviations: { text: string; requestIds: string[] }[];
+  /** null when it was built without a model call (a small change). */
+  model: string | null;
+  createdAt: string;
 }
 
 export interface ReviewView {
@@ -160,6 +202,19 @@ export interface ReviewView {
   explaining: boolean;
   /** Why the last explanation run failed, if it did. */
   error: string | null;
+  /** What you asked for: the requests that led to these edits, and the latest one. */
+  requests: TrailRequest[];
+  /** Tests and checks Claude ran in the session, oldest first. */
+  tests: TestRun[];
+  /** Steps that failed or were denied. */
+  failures: TrailFailure[];
+  overview: ReviewOverview | null;
+  /** The overview was written for an earlier set of changes. */
+  overviewStale: boolean;
+  overviewing: boolean;
+  overviewError: string | null;
+  /** Behaviors you marked as understood, by id, and whether their files changed since. */
+  understood: Record<string, { at: string; changed: boolean }>;
 }
 
 /** Claude Code's `/context` categories (tokens each), and the space kept free for autocompact. */
@@ -266,8 +321,14 @@ export interface CompanionApi {
   unpinFile(sessionId: string, path: string): Promise<void>;
   reloadPins(sessionId: string): Promise<Result>;
   openNotes(sessionId: string): Promise<void>;
-  /** What the session changed, file by file; `explain` also writes the missing explanations. */
+  /** What the session changed, file by file; `explain` also writes the missing explanations and overview. */
   getReview(sessionId: string, explain?: boolean): Promise<ReviewView>;
+  /** Writes a new overview for the current changes (the shown one is out of date). */
+  refreshOverview(sessionId: string): Promise<void>;
+  /** Marks a file reviewed (its current hunks), or clears the mark. */
+  markReviewed(sessionId: string, abs: string, reviewed: boolean): Promise<void>;
+  /** Marks a behavior understood, or clears the mark. This is your acknowledgement, not test evidence. */
+  markUnderstood(sessionId: string, behaviorId: string, understood: boolean): Promise<void>;
   /** Opens a file the session changed in its default app. */
   openChangedFile(sessionId: string, path: string): Promise<void>;
   refreshNotes(sessionId: string): Promise<void>;

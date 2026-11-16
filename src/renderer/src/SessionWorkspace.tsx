@@ -42,6 +42,7 @@ export function SessionWorkspace({
   const review = useReview(sessionId, mode === 'review');
   const [focus, setFocus] = useState<{ id: string; at: number } | null>(null);
   const [rail, setRail] = useState(true);
+  const [compose, setCompose] = useState<{ text: string; at: number } | null>(draft ? { text: draft, at: 0 } : null);
   const sideChats = useSideChats(sessionId);
   const [side, setSide] = useState<SideView | null>(null);
   const askSide = useCallback((anchor: SideAnchor) => setSide({ anchor }), []);
@@ -152,6 +153,10 @@ export function SessionWorkspace({
               setMode('conversation');
               setFocus({ id, at: Date.now() });
             }}
+            onDraft={(text) => {
+              setMode('conversation');
+              setCompose({ text, at: Date.now() });
+            }}
           />
         )}
         <div className={`panes ${mode}`} hidden={mode === 'audit' || mode === 'review'}>
@@ -174,7 +179,8 @@ export function SessionWorkspace({
               />
               <Composer
                 state={state}
-                draft={draft}
+                draft={compose?.text}
+                draftKey={compose?.at}
                 onSend={async (text) => {
                   const r = await api.send(sessionId, text);
                   return r.ok ? null : r.error;

@@ -19,10 +19,14 @@ export interface FileChange {
   removed: number;
   oldLineCount: number;
   stepIds: string[];
+  /** When each of those steps ran. */
+  stepTs: string[];
   /** What Claude said just before each of those steps (null when it said nothing), at no extra cost. */
   stepNotes: (string | null)[];
   /** The messages that asked for these edits, and what Claude said while making them: the "why". */
   requests: string[];
+  /** The conversation ids of those messages. */
+  requestIds: string[];
   remarks: string[];
   hash: string;
 }
@@ -34,6 +38,7 @@ const CONTEXT_LINES = 3;
 interface Pending {
   name: string;
   itemId: string;
+  ts: string;
   note: string | null;
   path: string | null;
 }
@@ -50,8 +55,10 @@ interface Acc {
   /** Each edit in order, to undo them from the file on disk when the content before wasn't recorded. */
   ops: Op[];
   stepIds: string[];
+  stepTs: string[];
   stepNotes: (string | null)[];
   requests: string[];
+  requestIds: string[];
   remarks: string[];
 }
 
@@ -64,6 +71,7 @@ export function collectChanges(lines: string[], readFile?: (abs: string) => stri
   const pending = new Map<string, Pending>();
   const files = new Map<string, Acc>();
   let request = '';
+  let requestId = '';
   let remarks: string[] = [];
 
   for (const line of lines) {
@@ -82,7 +90,7 @@ export function collectChanges(lines: string[], readFile?: (abs: string) => stri
         const itemId = content.length > 1 ? `${rec.uuid}:${i}` : rec.uuid;
         if (block?.type === 'text' && typeof block.text === 'string' && block.text.trim()) remarks = [...remarks, block.text.trim()].slice(-3);
         else if (block?.type === 'tool_use' && EDIT_TOOLS.has(block.name))
-          pending.set(block.id, { name: block.name, itemId, note: remarks.at(-1) ?? null, path: typeof block.input?.file_path === 'string' ? block.input.file_path : null });
+          pending.set(block.id, { name: block.name, itemId, ts: typeof rec.timestamp === 'string' ? rec.timestamp : '', note: remarks.at(-1) ?? null, path: typeof block.input?.file_path === 'string' ? block.input.file_path : null });
       });
       continue;
     }
@@ -93,6 +101,7 @@ export function collectChanges(lines: string[], readFile?: (abs: string) => stri
       const text = typeof content === 'string' ? content : content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('\n');
       if (!rec.isMeta && text.trim() && !HARNESS.test(text.trim())) {
         request = text.trim();
+        requestId = typeof rec.uuid === 'string' ? rec.uuid : '';
         remarks = [];
       }
       continue;
@@ -109,7 +118,10 @@ export function collectChanges(lines: string[], readFile?: (abs: string) => stri
       if (!abs) continue;
       apply(files, abs, call, r);
       const acc = files.get(abs)!;
-      if (request && !acc.requests.includes(request)) acc.requests = [...acc.requests, request].slice(-2);
+      if (request && !acc.requests.includes(request)) {
+        acc.requests = [...acc.requests, request].slice(-2);
+        acc.requestIds = [...acc.requestIds, requestId].slice(-2);
+      }
       for (const m of remarks) if (!acc.remarks.includes(m)) acc.remarks = [...acc.remarks, m].slice(-4);
     }
   }
@@ -123,10 +135,11 @@ function apply(files: Map<string, Acc>, abs: string, call: Pending, r: Record<st
   const created = call.name === 'Write' && (r.type === 'create' || (original === null && typeof r.content === 'string'));
   let acc = files.get(abs);
   if (!acc) {
-    acc = { abs, isNew: created, before: created ? '' : original, after: created ? '' : original, edits: [], ops: [], stepIds: [], stepNotes: [], requests: [], remarks: [] };
+    acc = { abs, isNew: created, before: created ? '' : original, after: created ? '' : original, edits: [], ops: [], stepIds: [], stepTs: [], stepNotes: [], requests: [], requestIds: [], remarks: [] };
     files.set(abs, acc);
   }
   acc.stepIds.push(call.itemId);
+  acc.stepTs.push(call.ts);
   acc.stepNotes.push(call.note);
   const hunks = toHunks(r.structuredPatch);
   acc.edits.push(...hunks);
@@ -205,8 +218,10 @@ function finish(acc: Acc): FileChange {
     removed,
     oldLineCount,
     stepIds: acc.stepIds,
+    stepTs: acc.stepTs,
     stepNotes: acc.stepNotes,
     requests: acc.requests,
+    requestIds: acc.requestIds,
     remarks: acc.remarks,
     hash,
   };
@@ -253,4 +268,13 @@ export function diffText(hunks: ReviewHunk[], maxChars = 6000): string {
     out += part;
   }
   return out;
+}
+
+/**
+ * Identifies a hunk by what it changes (its removed and added lines), not where: so a hunk you
+ * reviewed is still recognised when edits elsewhere in the file move it. Context lines are left out.
+ */
+export function hunkKey(h: ReviewHunk): string {
+  const body = h.lines.filter((l) => l.startsWith('+') || l.startsWith('-')).join('\n');
+  return createHash('sha256').update(body).digest('hex').slice(0, 16);
 }

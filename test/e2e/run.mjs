@@ -291,6 +291,27 @@ try {
   check('edited files show in Files changed', await until(async () => (await railText()).includes('src/retry.ts') && (await railText()).includes('README.md')));
   await page.locator('.rail-h button', { hasText: 'Review' }).click();
   const review = page.locator('.review-view');
+  // Overview: what you asked against what was implemented, the changes by behavior, risks and evidence.
+  const overview = review.locator('.review-pane.overview');
+  check('Review opens on an overview of the changes', await until(async () => (await overview.locator('.ov-intent').innerText()).includes('please make-edits')));
+  check('…with what was implemented beside what you asked, labelled as inferred', await until(async () => (await overview.locator('.ov-intent').innerText()).includes('Adds a retry helper') && (await overview.locator('.ov-src').first().innerText()).startsWith('Inferred by')));
+  check('…grouped by behavior, riskiest first', await until(async () => (await overview.locator('.ov-card-title').allInnerTexts()).join('|') === 'Retry flaky calls|Document retries'));
+  check('…with each risk in words', (await overview.locator('.ov-card').first().locator('.risk').innerText()).includes('Medium risk'));
+  check('…a file the model named but the chat never changed is left out', !(await overview.innerText()).includes('not/a/changed/file.ts'));
+  check('…and possible differences from the request, marked inferred', (await overview.locator('.ov-dev').innerText()).includes('fixed at three'));
+  check('…test evidence per behavior: the retry was tested after its edit', (await overview.locator('.ov-card').first().locator('.vchip').innerText()) === 'Tested after edit');
+  await overview.locator('.ov-card-head', { hasText: 'Document retries' }).click();
+  check('…the README was edited after the tests ran', (await overview.locator('.ov-card', { hasText: 'Document retries' }).locator('.ov-card-head .vchip').innerText()) === 'Edited after tests');
+  await overview.locator('.ov-card').first().locator('.ov-check input').check();
+  check('"I understand this change" is kept as your acknowledgement', await until(async () => (await overview.locator('.ov-card').first().locator('.ov-ok').count()) === 1));
+  await page.screenshot({ path: join(shots, '4c-review-overview.png') });
+  await review.getByRole('tab', { name: 'Verify' }).click();
+  const verify = review.locator('.review-pane.verify');
+  check('Verify lists the test run with its outcome', await until(async () => (await verify.locator('.vruns').innerText()).includes('npm test') && (await verify.locator('.vruns .vchip').first().innerText()) === 'Passed'));
+  check('…and which files were edited after it', (await verify.locator('.vstale').innerText()).includes('README.md'));
+  check('…without claiming what the run covered', (await verify.locator('.vruns').innerText()).includes('scope as configured, not recorded'));
+  await page.screenshot({ path: join(shots, '4c-review-verify.png') });
+  await review.getByRole('tab', { name: 'Explore' }).click();
   check('Review lists every file the chat changed', await until(async () => (await review.locator('.review-file').count()) === 2));
   const retryCard = review.locator('.review-file', { hasText: 'src/retry.ts' });
   check("…with one net diff per file, across the chat's edits", (await retryCard.locator('.rn-new').count()) === 1 && (await retryCard.locator('tr.add').count()) === 8);
@@ -304,11 +325,14 @@ try {
   check("the rail's counts are the file's net change, as in the review", /src\/retry\.ts\s*\+8(?!\d)/.test(await railText()));
   await page.screenshot({ path: join(shots, '4c-review.png') });
   await readmeCard.locator('.rf-viewed input').check();
-  check('marking a file viewed folds it away', (await readmeCard.locator('.rf-diff').count()) === 0 && (await review.locator('.review-total').innerText()).includes('1 of 2 viewed'));
+  check('marking a file reviewed folds it away', await until(async () => (await readmeCard.locator('.rf-diff').count()) === 0 && (await review.locator('.review-stats').innerText()).includes('1 of 2 reviewed')));
   await readmeCard.locator('.rf-viewed input').uncheck();
+  await until(async () => (await readmeCard.locator('.rf-diff').count()) === 1);
   await readmeCard.getByRole('button', { name: 'Show in chat' }).click();
   check('Show in chat jumps to the step that made the change', await until(async () => (await page.locator('.convo-pane').count()) === 1 && (await page.locator('.review-view').count()) === 0));
   await page.locator('.seg button', { hasText: 'Review' }).click();
+  check('the understood mark survives reopening the review', await until(async () => (await overview.locator('.ov-card').first().locator('.ov-ok').count()) === 1));
+  await review.getByRole('tab', { name: 'Explore' }).click();
   check('reopening the review reuses the explanations, with no new model call', await until(async () => (await review.locator('.rf-explain').count()) === 2) && (await review.locator('.review-note').count()) === 0);
   await page.locator('.seg button', { hasText: 'Conversation' }).click();
 

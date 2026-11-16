@@ -15,9 +15,9 @@ describe('diffRows', () => {
     const after = before.replace('line 5\n', 'line five\n').replace('line 15\n', 'line 15\nline 15b\n');
     const rows = diffRows(file(before, after));
     expect(rows[0]).toEqual({ kind: 'gap', count: 3 }); // lines 1–3
-    expect(rows).toContainEqual({ kind: 'del', old: 5, new: null, text: 'line 5' });
-    expect(rows).toContainEqual({ kind: 'add', old: null, new: 5, text: 'line five' });
-    expect(rows).toContainEqual({ kind: 'add', old: null, new: 16, text: 'line 15b' });
+    expect(rows).toContainEqual({ kind: 'del', old: 5, new: null, text: 'line 5', hunk: 0 });
+    expect(rows).toContainEqual({ kind: 'add', old: null, new: 5, text: 'line five', hunk: 0 });
+    expect(rows).toContainEqual({ kind: 'add', old: null, new: 16, text: 'line 15b', hunk: 1 });
     expect(rows.filter((r) => r.kind === 'gap')).toEqual([
       { kind: 'gap', count: 3 },
       { kind: 'gap', count: 8 }, // lines 7–14
@@ -28,8 +28,18 @@ describe('diffRows', () => {
   it('shows a new file with no gaps', () => {
     const rows = diffRows(file('', 'a\nb\n'));
     expect(rows).toEqual([
-      { kind: 'add', old: null, new: 1, text: 'a' },
-      { kind: 'add', old: null, new: 2, text: 'b' },
+      { kind: 'add', old: null, new: 1, text: 'a', hunk: 0 },
+      { kind: 'add', old: null, new: 2, text: 'b', hunk: 0 },
+    ]);
+  });
+
+  it('marks where each hunk starts, with the lines it spans after the change', () => {
+    const before = lines(20);
+    const after = before.replace('line 5\n', 'line five\n').replace('line 15\n', 'line 15\nline 15b\n');
+    const heads = diffRows(file(before, after), { headers: true }).filter((r) => r.kind === 'hunk');
+    expect(heads).toEqual([
+      { kind: 'hunk', hunk: 0, from: 4, to: 6 },
+      { kind: 'hunk', hunk: 1, from: 15, to: 17 },
     ]);
   });
 

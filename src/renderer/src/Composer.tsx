@@ -6,6 +6,8 @@ import { shortModel } from '../../shared/model';
 interface Props {
   state: SessionState;
   draft?: string;
+  /** Changes whenever a new draft is handed in, so the same text can be handed in twice. */
+  draftKey?: number;
   onSend: (text: string) => Promise<string | null>;
   onInterrupt: () => void;
   onCycleMode: () => void;
@@ -23,7 +25,7 @@ const MODE_LABEL: Record<string, string> = {
 
 export { shortModel };
 
-export function Composer({ state, draft, onSend, onInterrupt, onCycleMode }: Props) {
+export function Composer({ state, draft, draftKey, onSend, onInterrupt, onCycleMode }: Props) {
   const [text, setText] = useState(draft ?? '');
   const [error, setError] = useState<string | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
@@ -34,7 +36,7 @@ export function Composer({ state, draft, onSend, onInterrupt, onCycleMode }: Pro
   useEffect(() => {
     if (draft) setText(draft);
     box.current?.focus();
-  }, [draft, state.sessionId]);
+  }, [draft, draftKey, state.sessionId]);
 
   // Grow with the text, up to a limit.
   useEffect(() => {

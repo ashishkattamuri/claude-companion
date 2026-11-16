@@ -64,7 +64,7 @@ export function Conversation({ items, state, sentFromApp, onAnswer, onShowTermin
             live={live}
             waiting={state.status === 'waiting'}
             fromApp={t.user ? sentFromApp.has(t.user.id) : false}
-            focus={focus && t.steps.some((s) => s.id === focus.id) ? focus : null}
+            focus={focus && (t.user?.id === focus.id || t.steps.some((s) => s.id === focus.id)) ? focus : null}
             threads={threads}
             onAskSide={onAskSide}
             onOpenSide={onOpenSide}
@@ -122,6 +122,11 @@ const TurnView = memo(function TurnView({
   onAskSide?: (anchor: SideAnchor) => void;
   onOpenSide?: (chatId: string) => void;
 }) {
+  const userFocused = !!focus && !!turn.user && focus.id === turn.user.id;
+  const userRow = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (userFocused) userRow.current?.scrollIntoView({ block: 'center' });
+  }, [userFocused, focus]);
   if (turn.compaction) return <CompactionMarker notice={turn.compaction} />;
   // The answer can be asked about once it's written: its text is what Claude said after its last step.
   const answerText = turn.answer.flatMap((i) => (i.kind === 'assistant' ? [i.text] : [])).join('\n\n');
@@ -130,7 +135,7 @@ const TurnView = memo(function TurnView({
   return (
     <>
       {turn.user && (
-        <div className="msg-wrap user">
+        <div className={`msg-wrap user ${userFocused ? 'focused' : ''}`} ref={userRow}>
           <div className="u-msg">
             <div className="u-text">{turn.user.text}</div>
             {turn.user.images > 0 && <div className="via">{turn.user.images} image(s) attached</div>}
@@ -151,7 +156,7 @@ const TurnView = memo(function TurnView({
           {n.text}
         </div>
       ))}
-      {turn.steps.length > 0 && <Steps steps={turn.steps} cwd={cwd} openByDefault={last && live} waiting={last && waiting} focus={focus} />}
+      {turn.steps.length > 0 && <Steps steps={turn.steps} cwd={cwd} openByDefault={last && live} waiting={last && waiting} focus={userFocused ? null : focus} />}
       {turn.answer.length > 0 && (
         <div className="msg-wrap answer">
           {turn.answer.map((item) => (

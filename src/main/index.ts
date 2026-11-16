@@ -197,6 +197,9 @@ app.whenReady().then(() => {
   ipcMain.handle('session:reloadPins', (_e, id: string) => service.reloadPins(id));
   ipcMain.handle('session:refreshNotes', (_e, id: string) => service.refreshNotes(id));
   ipcMain.handle('session:review', (_e, id: string, explain: boolean) => service.review(id, explain));
+  ipcMain.handle('review:overview', (_e, id: string) => service.overview(id));
+  ipcMain.handle('review:markReviewed', (_e, id: string, abs: string, reviewed: boolean) => service.markReviewed(id, abs, reviewed));
+  ipcMain.handle('review:markUnderstood', (_e, id: string, behaviorId: string, understood: boolean) => service.markUnderstood(id, behaviorId, understood));
   ipcMain.handle('session:openChangedFile', async (_e, id: string, path: string) => {
     const file = service.reviewedFile(id, path);
     if (file) await shell.openPath(file);

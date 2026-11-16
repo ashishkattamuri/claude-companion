@@ -2,6 +2,7 @@ import { execFile, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import { collectChanges, type FileChange } from '../adapter/changes.js';
+import { collectTrail, lastEdits, verificationFor, type Trail } from '../adapter/trail.js';
 import type { ConversationItem } from '../adapter/conversation.js';
 import { detect } from '../analyze/audit/detectors.js';
 import { chunkTurns, review, reviewModel } from '../analyze/audit/review.js';
@@ -15,6 +16,8 @@ import type { LlmClient } from '../analyze/llm.js';
 import { notesBehind, notesPath, readNotes, recentExchanges, updateNotes } from '../analyze/notes.js';
 import { getRecap, recapDay, removeGoneSessionsFromRecaps, removeSessionsFromRecaps } from '../analyze/recap.js';
 import { cachedExplanations, explainChanges } from '../analyze/review.js';
+import { isTrivial, overviewKey, relevantRequests, storedOverview, trivialOverview, writeOverview } from '../analyze/overview.js';
+import { fileKeys, fileReview, readMarks, setMark } from '../analyze/reviewMarks.js';
 import { analysisNeeded, currentStatus, runJobs } from '../analyze/runner.js';
 import type { Config } from '../config.js';
 import {
@@ -124,13 +127,15 @@ export class CompanionService {
   private auditing = new Map<string, Promise<Result<AuditView>>>();
   private side: SideChats;
   /** Each session's changes, kept until its transcript grows. */
-  private changes = new Map<string, { key: string; files: FileChange[]; at: number }>();
+  private changes = new Map<string, { key: string; files: FileChange[]; trail: Trail; at: number }>();
   private changesRecheck = new Map<string, NodeJS.Timeout>();
   private heavyCache = new Map<string, { key: string; items: HeavyItem[]; at: number }>();
   private heavyRecheck = new Map<string, NodeJS.Timeout>();
   /** Explanations being written, and why the last attempt failed, by session. */
   private explaining = new Map<string, Promise<void>>();
   private explainErrors = new Map<string, string>();
+  private overviewing = new Map<string, Promise<void>>();
+  private overviewErrors = new Map<string, string>();
   private context: ContextUsage | null = null;
 
   constructor(private d: ServiceDeps) {
@@ -1011,16 +1016,36 @@ export class CompanionService {
 
   /**
    * What the session changed, file by file: each file's net diff, whether it still matches the disk,
-   * and a short explanation. `explain` writes the missing explanations in the background (one small
-   * model call per batch of files); the view reports them as they arrive through onChanged.
+   * a short explanation, test evidence and your review marks; and an overview grouping the changes by
+   * behavior. `explain` writes the missing explanations, then the overview if there is none yet, in the
+   * background (the view reports them as they arrive through onChanged). An overview written for
+   * earlier changes is shown marked out of date, and is only rewritten when you ask.
    */
   review(sessionId: string, explain = false): ReviewView {
-    const files = this.sessionChanges(sessionId);
-    if (explain && files.length) this.explain(sessionId, files);
+    const { files, trail } = this.sessionTrail(sessionId);
+    if (explain && files.length) {
+      this.explain(sessionId, files);
+      if (!storedOverview(this.d.db, sessionId)) this.overview(sessionId);
+    }
     const known = cachedExplanations(this.d.db, files.map((f) => f.hash));
+    const reviewed = readMarks(this.d.db, sessionId, 'reviewed');
+    const display = (abs: string) => this.display(sessionId, abs);
+    const key = overviewKey(files, trail.requests);
+    let stored = storedOverview(this.d.db, sessionId);
+    // A small change is summarised from its own explanation, so it never needs the overview call.
+    if (files.length && isTrivial(files) && (!stored || stored.key !== key))
+      stored = { key, overview: trivialOverview(files, trail.requests, known.get(files[0]!.hash) ?? null, display) };
+    const byPath = new Map(files.map((f) => [display(f.abs), f]));
+    const lastSeq = lastEdits(trail);
+    const understood: ReviewView['understood'] = {};
+    for (const [id, m] of readMarks(this.d.db, sessionId, 'understood')) {
+      const b = stored?.overview.behaviors.find((x) => x.id === id);
+      const now = (b?.files ?? []).map((p) => byPath.get(p)?.hash ?? '').sort();
+      understood[id] = { at: m.at, changed: !b || now.join(',') !== [...m.keys].sort().join(',') };
+    }
     return {
       files: files.map((f) => ({
-        path: this.display(sessionId, f.abs),
+        path: display(f.abs),
         abs: f.abs,
         isNew: f.isNew,
         added: f.added,
@@ -1032,11 +1057,64 @@ export class CompanionService {
         partial: f.before === null,
         stepIds: f.stepIds,
         stepNotes: f.stepNotes,
+        stepTs: f.stepTs,
+        requestIds: f.requestIds,
         hash: f.hash,
+        lastSeq: lastSeq.get(f.abs) ?? null,
+        verification: verificationFor(lastSeq.get(f.abs) ?? null, trail.tests),
+        review: fileReview(f, reviewed.get(f.abs)),
       })),
       explaining: this.explaining.has(sessionId),
       error: this.explainErrors.get(sessionId) ?? null,
+      requests: relevantRequests(files, trail.requests),
+      tests: trail.tests,
+      failures: trail.failures,
+      overview: files.length ? (stored?.overview ?? null) : null,
+      overviewStale: !!stored && stored.key !== key,
+      overviewing: this.overviewing.has(sessionId),
+      overviewError: this.overviewErrors.get(sessionId) ?? null,
+      understood,
     };
+  }
+
+  /** Writes the overview for the session's current changes (after any explanations being written). */
+  overview(sessionId: string): void {
+    if (this.overviewing.has(sessionId)) return;
+    this.overviewErrors.delete(sessionId);
+    const p = (async () => {
+      await this.explaining.get(sessionId);
+      const { files, trail } = this.sessionTrail(sessionId);
+      if (!files.length || isTrivial(files)) return;
+      const explanations = cachedExplanations(this.d.db, files.map((f) => f.hash));
+      await writeOverview(this.d.db, this.d.cfg, this.d.llm, sessionId, { files, requests: trail.requests, tests: trail.tests, explanations }, (abs) =>
+        this.display(sessionId, abs),
+      );
+    })()
+      .catch((err: Error) => void this.overviewErrors.set(sessionId, err.message || 'Could not write the overview.'))
+      .finally(() => {
+        this.overviewing.delete(sessionId);
+        this.d.onChanged?.();
+      });
+    this.overviewing.set(sessionId, p);
+    this.d.onChanged?.();
+  }
+
+  /** Marks a file reviewed as it is now (its current hunks), or clears the mark. */
+  markReviewed(sessionId: string, abs: string, reviewed: boolean): void {
+    const f = this.sessionChanges(sessionId).find((x) => x.abs === abs);
+    if (!f) return;
+    setMark(this.d.db, sessionId, 'reviewed', abs, reviewed ? fileKeys(f) : null);
+    this.d.onChanged?.();
+  }
+
+  /** Marks a behavior understood as its files are now, or clears the mark. */
+  markUnderstood(sessionId: string, behaviorId: string, understood: boolean): void {
+    const view = this.review(sessionId);
+    const b = view.overview?.behaviors.find((x) => x.id === behaviorId);
+    if (understood && !b) return;
+    const hashes = (b?.files ?? []).map((p) => view.files.find((f) => f.path === p)?.hash ?? '');
+    setMark(this.d.db, sessionId, 'understood', behaviorId, understood ? hashes : null);
+    this.d.onChanged?.();
   }
 
   /** Opens a file the session changed in the default app for it. */
@@ -1044,11 +1122,15 @@ export class CompanionService {
     return this.sessionChanges(sessionId).some((f) => f.abs === abs) && existsSync(abs) ? abs : null;
   }
 
-  /**
-   * The session's changes, re-read when its transcript has grown. `maxStaleMs` lets a caller that asks
-   * often (the rail, on every update while Claude works) reuse a recent read instead of re-reading.
-   */
   private sessionChanges(sessionId: string, maxStaleMs = 0): FileChange[] {
+    return this.sessionTrail(sessionId, maxStaleMs).files;
+  }
+
+  /**
+   * The session's changes and trail, re-read when its transcript has grown. `maxStaleMs` lets a caller
+   * that asks often (the rail, on every update while Claude works) reuse a recent read.
+   */
+  private sessionTrail(sessionId: string, maxStaleMs = 0): { files: FileChange[]; trail: Trail } {
     const hit = this.changes.get(sessionId);
     const age = hit ? Date.now() - hit.at : Infinity;
     if (hit && age < maxStaleMs) {
@@ -1061,17 +1143,17 @@ export class CompanionService {
             this.d.onChanged?.();
           }, maxStaleMs - age + 50),
         );
-      return hit.files;
+      return hit;
     }
     const path = /^[\w-]+$/.test(sessionId) ? findTranscript(this.d.cfg.projectsDir, sessionId) : null;
-    if (!path) return [];
+    if (!path) return { files: [], trail: collectTrail([]) };
     const st = statSync(path);
     const key = `${path}:${st.size}:${st.mtimeMs}`;
-    if (hit?.key === key) return hit.files;
+    if (hit?.key === key) return hit;
     const lines = readFileSync(path, 'utf8').split('\n').filter(Boolean);
-    const files = collectChanges(lines, readText);
-    this.changes.set(sessionId, { key, files, at: Date.now() });
-    return files;
+    const entry = { key, files: collectChanges(lines, readText), trail: collectTrail(lines), at: Date.now() };
+    this.changes.set(sessionId, entry);
+    return entry;
   }
 
   private explain(sessionId: string, files: FileChange[]): void {

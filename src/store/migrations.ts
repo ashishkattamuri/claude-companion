@@ -225,4 +225,25 @@ export const MIGRATIONS: string[] = [
     created_at  TEXT NOT NULL
   );
   `,
+  `
+  -- Review overview: the changes grouped by behavior, the session's latest (it may be for older changes).
+  CREATE TABLE review_overviews (
+    session_id  TEXT PRIMARY KEY,
+    key         TEXT NOT NULL,     -- the set of changes and requests it was written for
+    json        TEXT NOT NULL,
+    model       TEXT,
+    created_at  TEXT NOT NULL
+  );
+
+  -- Your explicit review marks: a file reviewed (the hunks you saw), a behavior understood (its files'
+  -- changes when you said so). Seeing a change never sets one.
+  CREATE TABLE review_marks (
+    session_id  TEXT NOT NULL,
+    kind        TEXT NOT NULL,     -- reviewed | understood
+    target      TEXT NOT NULL,     -- the file's absolute path | the behavior id
+    keys_json   TEXT NOT NULL,     -- reviewed: hunk keys; understood: file change hashes
+    at          TEXT NOT NULL,
+    PRIMARY KEY (session_id, kind, target)
+  );
+  `,
 ];

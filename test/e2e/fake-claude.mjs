@@ -53,6 +53,19 @@ async function print(args, prompt) {
       lean_calls: 1,
       notes: '',
     };
+  } else if (schema.properties?.behaviors) {
+    // The review overview: code files are one behavior, docs another; it answers request 1.
+    const paths = [...prompt.matchAll(/<file path="([^"]+)"/g)].map((m) => m[1]);
+    const docs = paths.filter((p) => p.endsWith('.md'));
+    const code = paths.filter((p) => !p.endsWith('.md'));
+    out = {
+      implemented: 'Adds a retry helper that tries a call up to three times, and mentions it in the README.',
+      behaviors: [
+        ...(code.length ? [{ title: 'Retry flaky calls', summary: 'Calls wrapped in retry() are tried up to three times before failing.', why: 'So flaky calls recover.', files: code, requests: [1], risk: 'medium', risk_reason: 'Errors are swallowed on the first attempts, so callers never see why a try failed.' }] : []),
+        ...(docs.length ? [{ title: 'Document retries', summary: 'The README mentions the retries.', why: '', files: [...docs, 'not/a/changed/file.ts'], requests: [], risk: 'low', risk_reason: 'Docs only.' }] : []),
+      ],
+      deviations: [{ text: 'The retry count is fixed at three; the request did not say how many.', requests: [1] }],
+    };
   } else if (schema.properties?.files) {
     // The review's explanations: one per <file path="…"> in the prompt.
     const paths = [...prompt.matchAll(/<file path="([^"]+)"/g)].map((m) => m[1]);
@@ -311,6 +324,7 @@ function runDaemon([sessionId, ...args]) {
     const retry = join(cwd, 'src', 'retry.ts');
     write(retry, 'export async function retry(fn) {\n  return fn();\n}\n');
     edit(retry, '  return fn();', '  for (let i = 0; i < 3; i++) {\n    try {\n      return await fn();\n    } catch {}\n  }\n  return fn();');
+    tool('Bash', { command: 'npm test', description: 'Run the tests' }, { stdout: ' Test Files  1 passed (1)\n      Tests  3 passed (3)', stderr: '', interrupted: false });
     edit(readme, 'A small demo.', 'A small demo, with retries for flaky calls.');
     reply('Added src/retry.ts and mentioned it in the README.');
   }
