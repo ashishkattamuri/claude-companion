@@ -246,4 +246,15 @@ export const MIGRATIONS: string[] = [
     PRIMARY KEY (session_id, kind, target)
   );
   `,
+  `
+  -- "Since you last looked": the point in a session's transcript you said you had caught up to, with
+  -- each changed file's net change and hunks then. Only an explicit "mark as seen" moves it.
+  CREATE TABLE review_checkpoints (
+    session_id  TEXT PRIMARY KEY,
+    at          TEXT NOT NULL,
+    seq         INTEGER NOT NULL,  -- transcript lines seen
+    last_id     TEXT,              -- uuid of the record at that line
+    files_json  TEXT NOT NULL      -- { abs: { hash, keys } }
+  );
+  `,
 ];

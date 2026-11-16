@@ -7,6 +7,7 @@ import { collectChanges } from '../src/adapter/changes.js';
 import { classifyCommand, collectTrail, commandScope, testOutcome, verificationFor } from '../src/adapter/trail.js';
 import { groundOverview, isTrivial, overviewKey, relevantRequests } from '../src/analyze/overview.js';
 import { fileKeys, fileReview, readMarks, setMark } from '../src/analyze/reviewMarks.js';
+import { readCheckpoint, saveCheckpoint, sinceLastLook } from '../src/analyze/since.js';
 import { openDb } from '../src/store/db.js';
 
 function transcript() {
@@ -67,7 +68,7 @@ describe('collectTrail', () => {
     t.user('<system-reminder>ignore</system-reminder>');
 
     const trail = collectTrail(t.lines);
-    expect(trail.requests).toEqual([{ id: ask, ts: expect.any(String), text: 'Add retries to the client' }]);
+    expect(trail.requests).toEqual([{ id: ask, ts: expect.any(String), seq: 1, text: 'Add retries to the client' }]);
     expect(trail.edits).toMatchObject([{ stepId: edit, abs: '/p/a.ts' }]);
     expect(trail.tests.map((r) => [r.command, r.outcome, r.scope])).toEqual([
       ['npm test', 'passed', null],
@@ -167,5 +168,88 @@ describe('review marks', () => {
     setMark(db, 's1', 'reviewed', '/p/a.ts', null);
     expect(readMarks(db, 's1', 'reviewed').size).toBe(0);
     expect(readMarks(db, 's1', 'understood').get('b1')?.keys).toEqual(['h1']);
+  });
+});
+
+describe('since you last looked', () => {
+  const v0 = Array.from({ length: 30 }, (_, i) => `line ${i}`).join('\n') + '\n';
+  const edit = (t: ReturnType<typeof transcript>, id: string, abs: string, from: string, to: string) =>
+    t.tool(id, 'Edit', { file_path: abs }, { filePath: abs, oldString: 'x', newString: 'y', originalFile: from, structuredPatch: t.patch(from, to) });
+
+  function session() {
+    const t = transcript();
+    t.user('Change line 2');
+    const v1 = v0.replace('line 2\n', 'line two\n');
+    edit(t, 'e1', '/p/a.ts', v0, v1);
+    t.tool('b1', 'Bash', { command: 'npm test' }, { stdout: 'Tests  3 passed (3)', stderr: '' });
+    return { t, v1 };
+  }
+  const db = () => openDb(join(mkdtempSync(join(tmpdir(), 'since-')), 'db.sqlite'));
+
+  it('shows everything on a first look, and nothing once marked seen', () => {
+    const { t } = session();
+    const first = sinceLastLook(t.lines, null, null);
+    expect(first.baseline).toBe('none');
+    expect(first.files.map((f) => [f.abs, f.change])).toEqual([['/p/a.ts', 'new']]);
+    const d = db();
+    saveCheckpoint(d, 's', t.lines, first.upto);
+    const again = sinceLastLook(t.lines, readCheckpoint(d, 's'), null);
+    expect(again.baseline).toBe('ok');
+    expect(again.files).toEqual([]);
+    expect(again.tests).toEqual([]);
+  });
+
+  it('shows only what changed after the checkpoint, the hunks that are new, and tests made stale', () => {
+    const { t, v1 } = session();
+    const d = db();
+    saveCheckpoint(d, 's', t.lines, t.lines.length);
+    const ask = t.user('Also change line 25');
+    edit(t, 'e2', '/p/a.ts', v1, v1.replace('line 25\n', 'line twenty-five\n'));
+    edit(t, 'e3', '/p/b.ts', 'x\n', 'y\n');
+    const s = sinceLastLook(t.lines, readCheckpoint(d, 's'), null);
+    expect(s.files.map((f) => [f.abs, f.change, f.newHunks])).toEqual([
+      ['/p/a.ts', 'changed', [1]],
+      ['/p/b.ts', 'new', [0]],
+    ]);
+    expect(s.files[0]!.steps).toHaveLength(1);
+    expect(s.requests.map((r) => r.id)).toEqual([ask]);
+    expect(s.staleTests.map((x) => [x.command, x.files])).toEqual([['npm test', ['/p/a.ts', '/p/b.ts']]]);
+  });
+
+  it('stays frozen where you opened it and counts newer activity as incoming', () => {
+    const { t, v1 } = session();
+    const d = db();
+    saveCheckpoint(d, 's', t.lines, t.lines.length);
+    edit(t, 'e2', '/p/a.ts', v1, v1.replace('line 25\n', 'line twenty-five\n'));
+    const opened = sinceLastLook(t.lines, readCheckpoint(d, 's'), null);
+    edit(t, 'e3', '/p/b.ts', 'x\n', 'y\n');
+    t.tool('b2', 'Bash', { command: 'npm test' }, { stdout: 'Tests  1 failed (3)', stderr: '' }, { isError: true });
+    const frozen = sinceLastLook(t.lines, readCheckpoint(d, 's'), opened.upto);
+    expect(frozen.files.map((f) => f.abs)).toEqual(['/p/a.ts']);
+    expect(frozen.incoming).toEqual({ edits: 1, tests: 1, requests: 0 });
+    // Marking seen moves the checkpoint to what was shown, not past what you haven't seen.
+    saveCheckpoint(d, 's', t.lines, frozen.upto);
+    const next = sinceLastLook(t.lines, readCheckpoint(d, 's'), null);
+    expect(next.files.map((f) => f.abs)).toEqual(['/p/b.ts']);
+    expect(next.tests.map((x) => x.outcome)).toEqual(['failed']);
+  });
+
+  it('says so when the checkpoint is no longer in the transcript', () => {
+    const { t } = session();
+    const d = db();
+    saveCheckpoint(d, 's', t.lines, t.lines.length);
+    const rewritten = t.lines.map((l) => l.replace('"uuid":"u', '"uuid":"r'));
+    const s = sinceLastLook(rewritten, readCheckpoint(d, 's'), null);
+    expect(s.baseline).toBe('lost');
+    expect(s.files.map((f) => f.change)).toEqual(['new']);
+  });
+
+  it('reports a change edited back to how it was', () => {
+    const { t, v1 } = session();
+    const d = db();
+    saveCheckpoint(d, 's', t.lines, t.lines.length);
+    edit(t, 'e2', '/p/a.ts', v1, v0);
+    const s = sinceLastLook(t.lines, readCheckpoint(d, 's'), null);
+    expect(s.files.map((f) => [f.abs, f.change])).toEqual([['/p/a.ts', 'reverted']]);
   });
 });

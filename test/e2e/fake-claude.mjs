@@ -300,6 +300,7 @@ function runDaemon([sessionId, ...args]) {
       return;
     }
     if (prompt.includes('make-edits')) return makeEdits();
+    if (prompt.includes('more-edits')) return moreEdits();
     reply(`echo: ${prompt}`);
   }
   // Edits a file the project already has, writes a new one and edits it again, like Claude Code.
@@ -327,6 +328,19 @@ function runDaemon([sessionId, ...args]) {
     tool('Bash', { command: 'npm test', description: 'Run the tests' }, { stdout: ' Test Files  1 passed (1)\n      Tests  3 passed (3)', stderr: '', interrupted: false });
     edit(readme, 'A small demo.', 'A small demo, with retries for flaky calls.');
     reply('Added src/retry.ts and mentioned it in the README.');
+  }
+  // A follow-up that changes the retry count in the helper make-edits wrote.
+  function moreEdits() {
+    const retry = join(cwd, 'src', 'retry.ts');
+    record({ type: 'assistant', message: { role: 'assistant', model: 'claude-fake-1', content: [{ type: 'text', text: 'Raising the retry limit to five.' }] } });
+    const originalFile = readFileSync(retry, 'utf8');
+    const next = originalFile.replace('i < 3', 'i < 5');
+    writeFileSync(retry, next);
+    tool('Edit', { file_path: retry, old_string: 'i < 3', new_string: 'i < 5' }, {
+      filePath: retry, oldString: 'i < 3', newString: 'i < 5', originalFile, replaceAll: false, userModified: false,
+      structuredPatch: structuredPatch(retry, retry, originalFile, next, '', '', { context: 4 }).hunks,
+    });
+    reply('Raised the retry limit to five.');
   }
   function tool(name, input, toolUseResult) {
     const id = `toolu_${randomUUID().slice(0, 8)}`;

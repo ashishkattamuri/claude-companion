@@ -555,6 +555,18 @@ button.chip:hover:not(:disabled) { color: var(--ink); }
 .ov-check-row input { margin-top: 3px; }
 .ov-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
+/* Since you looked */
+.tab-count { margin-left: 6px; font-size: 10.5px; font-weight: 700; background: var(--amber-soft); color: var(--amber); border-radius: 999px; padding: 0 6px; }
+.since-head { display: flex; align-items: flex-start; gap: 16px; justify-content: space-between; }
+.since-head h3 { font-size: 15px; margin: 0 0 4px; }
+.since-head p { max-width: 70ch; }
+.since-files, .since-plain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.since-plain { gap: 6px; font-size: 13px; }
+.since-file-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.since-files p { margin: 2px 0 0; }
+.since-steps { border: 0; padding: 4px 0 0; }
+.since-steps li { gap: 10px; }
+
 /* Verify */
 .verify-lede { margin: 0; font-size: 13px; max-width: 70ch; }
 .vsec { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }

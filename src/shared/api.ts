@@ -4,6 +4,7 @@
  */
 import type { ConversationItem, PatchHunk, SessionFacts, ToolResult } from '../adapter/conversation.js';
 import type { TestRun, TrailFailure, TrailRequest, Verification } from '../adapter/trail.js';
+import type { SinceData, SinceFile } from '../analyze/since.js';
 import type { AuditView } from '../analyze/audit/view.js';
 import type { HeavyItem } from '../analyze/heavy.js';
 import type { RecapRow } from '../analyze/recap.js';
@@ -19,7 +20,12 @@ export type { ConversationItem, PatchHunk, SessionFacts, ToolResult, ProjectRow,
 export type { ServerView, RecapSource, GitHubActivity, GitHubItem, ServerConfig };
 export type { ActionResult, CatalogPlugin, MarketplaceAction, PluginAction, PluginCatalog, PluginConfig };
 export type { AuditView, HeavyItem };
-export type { TestRun, TrailFailure, TrailRequest, Verification };
+export type { TestRun, TrailFailure, TrailRequest, Verification, SinceFile };
+
+/** What a session did since your viewing checkpoint; `paths` names each file as the chat sees it. */
+export interface SinceView extends SinceData {
+  paths: Record<string, string>;
+}
 export type { AuditFindingView, AuditStepRef } from '../analyze/audit/view.js';
 
 /** A session's latest audit, whether one is running, and how far the session has moved on since. */
@@ -327,6 +333,13 @@ export interface CompanionApi {
   refreshOverview(sessionId: string): Promise<void>;
   /** Marks a file reviewed (its current hunks), or clears the mark. */
   markReviewed(sessionId: string, abs: string, reviewed: boolean): Promise<void>;
+  /**
+   * What changed since your viewing checkpoint, frozen at `upto` (a transcript position; omitted for
+   * the latest). Never moves the checkpoint.
+   */
+  getSince(sessionId: string, upto?: number | null): Promise<SinceView>;
+  /** You've caught up to `upto`: it becomes the new checkpoint. */
+  markSeen(sessionId: string, upto: number): Promise<void>;
   /** Marks a behavior understood, or clears the mark. This is your acknowledgement, not test evidence. */
   markUnderstood(sessionId: string, behaviorId: string, understood: boolean): Promise<void>;
   /** Opens a file the session changed in its default app. */

@@ -18,6 +18,7 @@ import { getRecap, recapDay, removeGoneSessionsFromRecaps, removeSessionsFromRec
 import { cachedExplanations, explainChanges } from '../analyze/review.js';
 import { isTrivial, overviewKey, relevantRequests, storedOverview, trivialOverview, writeOverview } from '../analyze/overview.js';
 import { fileKeys, fileReview, readMarks, setMark } from '../analyze/reviewMarks.js';
+import { readCheckpoint, saveCheckpoint, sinceLastLook } from '../analyze/since.js';
 import { analysisNeeded, currentStatus, runJobs } from '../analyze/runner.js';
 import type { Config } from '../config.js';
 import {
@@ -50,6 +51,7 @@ import type {
   RecapView,
   Result,
   ReviewView,
+  SinceView,
   SessionExtras,
   ToolChangeImpact,
   SessionListItem,
@@ -1097,6 +1099,27 @@ export class CompanionService {
       });
     this.overviewing.set(sessionId, p);
     this.d.onChanged?.();
+  }
+
+  /** What the session did since your viewing checkpoint, as of transcript position `upto`. */
+  since(sessionId: string, upto: number | null = null): SinceView {
+    const lines = this.transcriptLines(sessionId);
+    const data = sinceLastLook(lines, readCheckpoint(this.d.db, sessionId), upto, readText);
+    const paths: Record<string, string> = {};
+    for (const abs of [...data.files.map((f) => f.abs), ...data.edits.map((e) => e.abs), ...data.tests.flatMap((t) => t.editedAfter), ...data.staleTests.flatMap((t) => t.files)])
+      paths[abs] = this.display(sessionId, abs);
+    return { ...data, paths };
+  }
+
+  /** You've seen the session up to `upto`. Only this moves the checkpoint. */
+  markSeen(sessionId: string, upto: number): void {
+    saveCheckpoint(this.d.db, sessionId, this.transcriptLines(sessionId), upto, readText);
+    this.d.onChanged?.();
+  }
+
+  private transcriptLines(sessionId: string): string[] {
+    const path = /^[\w-]+$/.test(sessionId) ? findTranscript(this.d.cfg.projectsDir, sessionId) : null;
+    return path ? readFileSync(path, 'utf8').split('\n').filter(Boolean) : [];
   }
 
   /** Marks a file reviewed as it is now (its current hunks), or clears the mark. */

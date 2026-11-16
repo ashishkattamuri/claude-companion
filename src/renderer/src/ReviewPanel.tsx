@@ -18,6 +18,7 @@ import type { ReviewFile, ReviewView } from '../../shared/api';
 import { diffRows } from '../../shared/reviewRows';
 import { api } from './api';
 import { ReviewOverviewPane } from './ReviewOverview';
+import { ReviewSincePane, sinceCount, useSince } from './ReviewSince';
 import { ReviewVerifyPane, VerifyChip } from './ReviewVerify';
 
 for (const [name, lang] of Object.entries({ bash, css, go, java, javascript, json, markdown, python, ruby, rust, sql, typescript, xml, yaml }))
@@ -33,7 +34,7 @@ const LANG: Record<string, string> = {
 /** Past this many lines a file's diff starts folded, so one huge file doesn't bury the rest. */
 const FOLD_LINES = 400;
 
-export type ReviewMode = 'overview' | 'explore' | 'verify';
+export type ReviewMode = 'overview' | 'since' | 'explore' | 'verify';
 
 /** The session's changes. Opening the review asks for missing explanations once; updates just reload. */
 export function useReview(sessionId: string, open: boolean) {
@@ -72,9 +73,16 @@ export interface ReviewProps {
  */
 export function ReviewPanel(props: ReviewProps) {
   const { view } = props;
-  const [mode, setMode] = useState<ReviewMode>('overview');
+  const [mode, setMode] = useState<ReviewMode | null>(null);
   const [target, setTarget] = useState<{ path: string; hunk?: number; at: number } | null>(null);
-  if (!view) return <div className="review-view" />;
+  const since = useSince(props.sessionId);
+  const fresh = sinceCount(since.view);
+  // Coming back to a session with changes since your checkpoint opens on them; otherwise the overview.
+  const shown: ReviewMode = mode ?? (fresh > 0 ? 'since' : 'overview');
+  useEffect(() => {
+    if (mode === null && since.view) setMode(fresh > 0 ? 'since' : 'overview');
+  }, [mode, since.view, fresh]);
+  if (!view || !since.view) return <div className="review-view" />;
   const { files } = view;
   if (!files.length)
     return (
@@ -100,12 +108,14 @@ export function ReviewPanel(props: ReviewProps) {
           {(
             [
               ['overview', 'Overview'],
+              ['since', 'Since you looked'],
               ['explore', 'Explore'],
               ['verify', 'Verify'],
             ] as [ReviewMode, string][]
           ).map(([m, label]) => (
-            <button key={m} role="tab" aria-selected={mode === m} aria-pressed={mode === m} onClick={() => setMode(m)}>
+            <button key={m} role="tab" aria-selected={shown === m} aria-pressed={shown === m} onClick={() => setMode(m)}>
               {label}
+              {m === 'since' && fresh > 0 && <span className="tab-count tabular">{fresh}</span>}
             </button>
           ))}
         </div>
@@ -122,9 +132,12 @@ export function ReviewPanel(props: ReviewProps) {
           </span>
         </span>
       </div>
-      {mode === 'overview' && <ReviewOverviewPane {...props} view={view} onShowFile={showFile} />}
-      {mode === 'explore' && <Explore {...props} view={view} target={target} />}
-      {mode === 'verify' && <ReviewVerifyPane view={view} onJump={props.onJump} onShowFile={showFile} />}
+      {shown === 'overview' && <ReviewOverviewPane {...props} view={view} onShowFile={showFile} />}
+      {shown === 'since' && (
+        <ReviewSincePane since={since.view} review={view} onShowIncoming={since.showIncoming} onMarkSeen={since.markSeen} onJump={props.onJump} onShowFile={showFile} />
+      )}
+      {shown === 'explore' && <Explore {...props} view={view} target={target} />}
+      {shown === 'verify' && <ReviewVerifyPane view={view} onJump={props.onJump} onShowFile={showFile} />}
     </div>
   );
 }
@@ -312,7 +325,7 @@ const FileCard = memo(function FileCard({
 
 function Diff({ file: f, onAsk }: { file: ReviewFile; onAsk?: (hunk: number) => void }) {
   const lang = LANG[f.path.split('.').pop()?.toLowerCase() ?? ''];
-  const rows = useMemo(() => diffRows(f, { headers: f.hunks.length > 1 || !!onAsk }), [f, onAsk]);
+  const rows = useMemo(() => diffRows(f, { headers: f.hunks.length > 1 || !!onAsk || f.review.state === 'changed' }), [f, onAsk]);
   const again = new Set(f.review.state === 'changed' ? f.review.changedHunks : []);
   return (
     <div className="rf-diff-wrap">

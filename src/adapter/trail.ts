@@ -9,6 +9,7 @@ export interface TrailRequest {
   /** The conversation item id of the message, so it can be shown in the chat. */
   id: string;
   ts: string;
+  seq: number;
   text: string;
 }
 
@@ -41,6 +42,7 @@ export interface TestRun {
 export interface TrailFailure {
   stepId: string;
   ts: string;
+  seq: number;
   tool: string;
   /** What was attempted, e.g. the command or file. */
   target: string;
@@ -53,8 +55,8 @@ export interface Trail {
   edits: TrailEdit[];
   tests: TestRun[];
   failures: TrailFailure[];
-  /** Id and time of the transcript's last conversation record, to tell whether anything happened since. */
-  last: { id: string; ts: string } | null;
+  /** Id, time and position of the transcript's last conversation record. */
+  last: { id: string; ts: string; seq: number } | null;
 }
 
 const EDIT_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit']);
@@ -143,7 +145,7 @@ export function collectTrail(lines: string[]): Trail {
     if (!rec || typeof rec !== 'object' || rec.isSidechain) continue;
     if (rec.type !== 'user' && rec.type !== 'assistant') continue;
     const ts = typeof rec.timestamp === 'string' ? rec.timestamp : '';
-    if (typeof rec.uuid === 'string') trail.last = { id: rec.uuid, ts };
+    if (typeof rec.uuid === 'string') trail.last = { id: rec.uuid, ts, seq };
     const content = rec.message?.content;
 
     if (rec.type === 'assistant' && Array.isArray(content)) {
@@ -158,7 +160,7 @@ export function collectTrail(lines: string[]): Trail {
 
     if (typeof content === 'string' || (Array.isArray(content) && !content.some((b: any) => b?.type === 'tool_result'))) {
       const text = typeof content === 'string' ? content : (content ?? []).filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('\n');
-      if (!rec.isMeta && text.trim() && !HARNESS.test(text.trim()) && typeof rec.uuid === 'string') trail.requests.push({ id: rec.uuid, ts, text: text.trim() });
+      if (!rec.isMeta && text.trim() && !HARNESS.test(text.trim()) && typeof rec.uuid === 'string') trail.requests.push({ id: rec.uuid, ts, seq, text: text.trim() });
       continue;
     }
 
@@ -186,7 +188,7 @@ export function collectTrail(lines: string[]): Trail {
       }
       if (isError) {
         const target = String(call.input.command ?? call.input.file_path ?? call.input.pattern ?? call.input.url ?? '').split('\n')[0]!.slice(0, 160);
-        trail.failures.push({ stepId: call.stepId, ts: call.ts, tool: call.name, target, text: text.slice(0, 400), denied: DENIED.test(text) });
+        trail.failures.push({ stepId: call.stepId, ts: call.ts, seq, tool: call.name, target, text: text.slice(0, 400), denied: DENIED.test(text) });
       }
     }
   }

@@ -34,6 +34,8 @@ const api: CompanionApi = {
   openNotes: (id) => ipcRenderer.invoke('session:openNotes', id),
   getReview: (id, explain) => ipcRenderer.invoke('session:review', id, explain === true),
   refreshOverview: (id) => ipcRenderer.invoke('review:overview', id),
+  getSince: (id, upto) => ipcRenderer.invoke('review:since', id, upto ?? null),
+  markSeen: (id, upto) => ipcRenderer.invoke('review:markSeen', id, upto),
   markReviewed: (id, abs, reviewed) => ipcRenderer.invoke('review:markReviewed', id, abs, reviewed),
   markUnderstood: (id, behaviorId, understood) => ipcRenderer.invoke('review:markUnderstood', id, behaviorId, understood),
   openChangedFile: (id, path) => ipcRenderer.invoke('session:openChangedFile', id, path),

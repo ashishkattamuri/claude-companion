@@ -334,6 +334,30 @@ try {
   check('the understood mark survives reopening the review', await until(async () => (await overview.locator('.ov-card').first().locator('.ov-ok').count()) === 1));
   await review.getByRole('tab', { name: 'Explore' }).click();
   check('reopening the review reuses the explanations, with no new model call', await until(async () => (await review.locator('.rf-explain').count()) === 2) && (await review.locator('.review-note').count()) === 0);
+
+  // Since you last looked: a checkpoint you set, and only what changed after it.
+  await retryCard.locator('.rf-viewed input').check();
+  await review.getByRole('tab', { name: /Since you looked/ }).click();
+  const since = review.locator('.review-pane.since');
+  check('a first look says everything is new and offers a baseline', await until(async () => (await since.locator('.since-head').innerText()).includes('Your first look')));
+  check('…without opening it marking anything seen or reviewed', (await since.locator('.since-files > li').count()) === 2 && (await review.locator('.review-stats').innerText()).includes('1 of 2 reviewed'));
+  await since.getByRole('button', { name: 'Mark all as seen' }).click();
+  check('marking it seen leaves nothing new', await until(async () => (await since.innerText()).includes('Nothing new since then')));
+  await page.locator('.seg button', { hasText: 'Conversation' }).click();
+  await page.locator('.composer textarea').fill('please more-edits');
+  await page.locator('.composer textarea').press('Enter');
+  check('the chat edits the reviewed file again', await until(async () => (await thread()).includes('Raised the retry limit to five')));
+  await page.locator('.seg button', { hasText: 'Review' }).click();
+  check('coming back opens on what changed since you looked', await until(async () => (await review.getByRole('tab', { name: /Since you looked/ }).getAttribute('aria-selected')) === 'true' && (await since.locator('.since-files > li').count()) === 1));
+  const again = since.locator('.since-files > li').first();
+  check('…the file changed again, flagged for another look', (await again.innerText()).includes('src/retry.ts') && (await again.innerText()).includes('Changed again') && (await again.innerText()).includes('needs another look'));
+  check('…with what Claude said at the edit', (await again.innerText()).includes('Raising the retry limit to five'));
+  check('…and the earlier passing test marked stale', (await since.locator('.vruns').innerText()).includes('Now stale') && (await since.locator('.vruns').innerText()).includes('src/retry.ts'));
+  check('…and your message since', (await since.innerText()).includes('please more-edits'));
+  await page.screenshot({ path: join(shots, '4d-review-since.png') });
+  await again.locator('.since-file-head .link').click();
+  check('it links to the changed hunk in the diff, marked for another look', await until(async () => (await retryCard.locator('.rf-again').count()) === 1 && (await retryCard.locator('tr.hunk.again').count()) === 1));
+  await page.screenshot({ path: join(shots, '4e-review-again.png') });
   await page.locator('.seg button', { hasText: 'Conversation' }).click();
 
   // Context tools on the original chat: pin a file, compact with a focus, hand off.
