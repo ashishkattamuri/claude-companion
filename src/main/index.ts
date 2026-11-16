@@ -186,6 +186,7 @@ app.whenReady().then(() => {
   ipcMain.handle('side:list', (_e, id: string) => service.listSideChats(id));
   ipcMain.handle('side:ask', (_e, id: string, ask: SideAsk) => service.askSide(id, ask));
   ipcMain.on('side:stop', (_e, chatId: string) => service.stopSide(chatId));
+  ipcMain.handle('side:latestChange', (_e, id: string, chatId: string) => service.latestChange(id, chatId));
   ipcMain.handle('side:delete', (_e, chatId: string) => service.deleteSideChat(chatId));
   ipcMain.handle('session:restartWithTools', (_e, id: string) => service.restartWithTools(id));
   ipcMain.handle('tools:install', () => service.installToolsEverywhere());

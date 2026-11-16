@@ -332,15 +332,18 @@ function runDaemon([sessionId, ...args]) {
   // A follow-up that changes the retry count in the helper make-edits wrote.
   function moreEdits() {
     const retry = join(cwd, 'src', 'retry.ts');
-    record({ type: 'assistant', message: { role: 'assistant', model: 'claude-fake-1', content: [{ type: 'text', text: 'Raising the retry limit to five.' }] } });
     const originalFile = readFileSync(retry, 'utf8');
-    const next = originalFile.replace('i < 3', 'i < 5');
+    const from = Number(/i < (\d+)/.exec(originalFile)?.[1] ?? 3);
+    const word = { 5: 'five', 7: 'seven', 9: 'nine' }[from + 2] ?? String(from + 2);
+    record({ type: 'assistant', message: { role: 'assistant', model: 'claude-fake-1', content: [{ type: 'text', text: `Raising the retry limit to ${word}.` }] } });
+    const [oldString, newString] = [`i < ${from}`, `i < ${from + 2}`];
+    const next = originalFile.replace(oldString, newString);
     writeFileSync(retry, next);
-    tool('Edit', { file_path: retry, old_string: 'i < 3', new_string: 'i < 5' }, {
-      filePath: retry, oldString: 'i < 3', newString: 'i < 5', originalFile, replaceAll: false, userModified: false,
+    tool('Edit', { file_path: retry, old_string: oldString, new_string: newString }, {
+      filePath: retry, oldString, newString, originalFile, replaceAll: false, userModified: false,
       structuredPatch: structuredPatch(retry, retry, originalFile, next, '', '', { context: 4 }).hunks,
     });
-    reply('Raised the retry limit to five.');
+    reply(`Raised the retry limit to ${word}.`);
   }
   function tool(name, input, toolUseResult) {
     const id = `toolu_${randomUUID().slice(0, 8)}`;

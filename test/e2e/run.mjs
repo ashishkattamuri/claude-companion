@@ -358,6 +358,34 @@ try {
   await again.locator('.since-file-head .link').click();
   check('it links to the changed hunk in the diff, marked for another look', await until(async () => (await retryCard.locator('.rf-again').count()) === 1 && (await retryCard.locator('tr.hunk.again').count()) === 1));
   await page.screenshot({ path: join(shots, '4e-review-again.png') });
+
+  // Ask about this change: a side thread on the exact hunk, frozen as it was, while the chat keeps working.
+  {
+    const transcriptOf = (id) => readdirSync(join(claudeDir, 'projects')).map((d) => join(claudeDir, 'projects', d, `${id}.jsonl`)).find(existsSync);
+    const parentFile = transcriptOf(parentId);
+    const before = readFileSync(parentFile, 'utf8');
+    await retryCard.locator('tr.hunk .hunk-ask').first().click();
+    const panel = page.locator('.side-panel');
+    check('"Ask about this change" opens a side thread on the exact diff', await until(async () => (await panel.locator('.side-diff').innerText()).includes('i < 5')));
+    check('…with the edit that made it', (await panel.locator('.side-src').innerText()).includes('Raising the retry limit to five'));
+    await panel.locator('textarea').fill('which callers could break?');
+    await panel.locator('textarea').press('Enter');
+    check('…answered in a fork, without touching the chat', await until(async () => (await panel.innerText()).includes('side: which callers could break?')) && readFileSync(parentFile, 'utf8') === before);
+    check('the hunk shows its thread', await until(async () => (await retryCard.locator('tr.hunk .side-badge').innerText()).includes('1 reply')));
+    await page.screenshot({ path: join(shots, '4f-ask-change.png') });
+    await panel.getByRole('button', { name: 'Send to chat…' }).click();
+    check('Send to chat puts an editable message in the composer, and sends nothing', await until(async () => (await page.locator('.composer textarea').inputValue()).startsWith('From a side question about src/retry.ts')) && readFileSync(parentFile, 'utf8') === before);
+    await page.locator('.composer textarea').fill('please more-edits');
+    await page.locator('.composer textarea').press('Enter');
+    check('when the chat edits that code again, the thread says its answer may be out of date', await until(async () => (await panel.locator('.side-stale').count()) === 1));
+    check('…and keeps the code as it was when asked', (await panel.locator('.side-diff').innerText()).includes('i < 5'));
+    await page.screenshot({ path: join(shots, '4g-ask-stale.png') });
+    await panel.getByRole('button', { name: 'Ask again on the latest code' }).click();
+    check('asking again anchors a new thread on the latest code, with the question ready', await until(async () => (await panel.locator('.side-diff').innerText()).includes('i < 7') && (await panel.locator('textarea').inputValue()) === 'which callers could break?'));
+    await panel.getByRole('button', { name: '‹ Side chats' }).click();
+    check('…and the original thread is kept', await until(async () => (await panel.innerText()).includes('code changed')));
+    await panel.getByRole('button', { name: 'Close side chats' }).click();
+  }
   await page.locator('.seg button', { hasText: 'Conversation' }).click();
 
   // Context tools on the original chat: pin a file, compact with a focus, hand off.

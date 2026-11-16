@@ -6,7 +6,7 @@ import { Composer, shortModel } from './Composer';
 import { Conversation } from './Conversation';
 import { DetailsRail, useExtras } from './DetailsRail';
 import { ReviewPanel, useReview } from './ReviewPanel';
-import { SidePanel, useSideChats, type SideAnchor, type SideView } from './SidePanel';
+import { changeAnchor, SidePanel, useSideChats, type SideAnchor, type SideView } from './SidePanel';
 import { shortPath } from './format';
 import { useSession } from './store';
 import { TerminalView } from './TerminalView';
@@ -157,6 +157,9 @@ export function SessionWorkspace({
               setMode('conversation');
               setCompose({ text, at: Date.now() });
             }}
+            onAskChange={(change) => setSide({ anchor: changeAnchor(change) })}
+            sideChats={sideChats}
+            onOpenSide={openSide}
           />
         )}
         <div className={`panes ${mode}`} hidden={mode === 'audit' || mode === 'review'}>
@@ -195,7 +198,24 @@ export function SessionWorkspace({
           )}
         </div>
       </section>
-      {side && <SidePanel sessionId={sessionId} chats={sideChats} view={side} onView={setSide} onClose={() => setSide(null)} onError={onError} />}
+      {side && (
+        <SidePanel
+          sessionId={sessionId}
+          chats={sideChats}
+          view={side}
+          onView={setSide}
+          onClose={() => setSide(null)}
+          onError={onError}
+          onJump={(id) => {
+            setMode('conversation');
+            setFocus({ id, at: Date.now() });
+          }}
+          onDraft={(text) => {
+            if (mode !== 'conversation' && mode !== 'split') setMode('conversation');
+            setCompose({ text, at: Date.now() });
+          }}
+        />
+      )}
       {rail && !side && (
         <DetailsRail state={state} items={items} extras={extras} onNavigate={onNavigate} onError={onError} onReview={() => setMode('review')}
           onJump={(id) => {

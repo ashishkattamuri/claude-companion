@@ -499,7 +499,19 @@ button.chip:hover:not(:disabled) { color: var(--ink); }
 .rf-diff tr.hunk:first-child td { border-top: 0; }
 .rf-diff tr.hunk td { display: table-cell; }
 .hunk-label { display: inline-flex; align-items: center; }
-.hunk-ask { float: right; font-size: 11.5px; }
+.hunk-acts { float: right; display: inline-flex; align-items: center; gap: 8px; }
+.hunk-ask { font-size: 11.5px; }
+.rf-actions .side-badge, .hunk-acts .side-badge { margin: 0; }
+.side-anchor.change { flex-shrink: 0; min-width: 0; }
+.side-anchor.change .side-label { margin-bottom: 6px; text-transform: none; letter-spacing: 0; font-size: 12px; }
+.side-diff { margin: 0; padding: 6px 0; max-height: 280px; overflow: auto; font: 11.5px/1.5 var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; white-space: pre; }
+.side-diff > span { display: block; min-width: max-content; padding: 0 10px; }
+.side-diff .add { color: var(--add); background: var(--add-bg); }
+.side-diff .del { color: var(--del); background: var(--del-bg); }
+.side-diff .at { color: var(--faint); }
+.side-src { margin-top: 6px; }
+.side-stale { margin: 8px 0; padding: 8px 10px; border-radius: 8px; background: var(--amber-soft); font-size: 12.5px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.side-send { margin-top: 4px; }
 .rf-diff tr.hunk.again td { background: var(--amber-soft); color: var(--ink); }
 .rf-diff tr.again .ln:first-child { box-shadow: inset 3px 0 0 var(--amber); }
 

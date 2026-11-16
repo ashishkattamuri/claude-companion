@@ -19,6 +19,7 @@ import { cachedExplanations, explainChanges } from '../analyze/review.js';
 import { isTrivial, overviewKey, relevantRequests, storedOverview, trivialOverview, writeOverview } from '../analyze/overview.js';
 import { fileKeys, fileReview, readMarks, setMark } from '../analyze/reviewMarks.js';
 import { readCheckpoint, saveCheckpoint, sinceLastLook } from '../analyze/since.js';
+import { changeIsStale, changeRef, matchingHunk } from '../shared/changeRef.js';
 import { analysisNeeded, currentStatus, runJobs } from '../analyze/runner.js';
 import type { Config } from '../config.js';
 import {
@@ -47,6 +48,7 @@ import { getSession, listProjects, listSessions, type SessionRow } from '../stor
 import type { SearchEarlierRequest, SocketRequest, SocketResponse } from '../mcp/protocol.js';
 import type {
   AuditState,
+  ChangeRef,
   NewSessionRequest,
   RecapView,
   Result,
@@ -427,7 +429,21 @@ export class CompanionService {
   // ── Side chats ───────────────────────────────────────────────────────────────────────────────
 
   listSideChats(sessionId: string): SideChat[] {
-    return this.side.list(sessionId);
+    let files: { abs: string; hash: string; hunkKeys: string[] }[] | null = null;
+    return this.side.list(sessionId, (c) => {
+      files ??= this.sessionChanges(sessionId).map((f) => ({ abs: f.abs, hash: f.hash, hunkKeys: fileKeys(f) }));
+      return changeIsStale(c, files);
+    });
+  }
+
+  /** The change a thread asked about, as the code is now, to ask again on the latest revision. */
+  latestChange(sessionId: string, chatId: string): ChangeRef | null {
+    const c = this.side.anchorOf(chatId)?.change;
+    if (!c) return null;
+    const f = this.sessionChanges(sessionId).find((x) => x.abs === c.abs);
+    if (!f) return null;
+    const file = { abs: f.abs, path: this.display(sessionId, f.abs), hash: f.hash, hunks: f.hunks, hunkKeys: fileKeys(f), stepIds: f.stepIds, stepNotes: f.stepNotes };
+    return changeRef(file, matchingHunk(c, file), f.requests.at(-1) ?? null);
   }
 
   /** Asks about a chat in a fork of it, on the chat's own model so its history comes from the cache. */
@@ -1062,6 +1078,7 @@ export class CompanionService {
         stepTs: f.stepTs,
         requestIds: f.requestIds,
         hash: f.hash,
+        hunkKeys: fileKeys(f),
         lastSeq: lastSeq.get(f.abs) ?? null,
         verification: verificationFor(lastSeq.get(f.abs) ?? null, trail.tests),
         review: fileReview(f, reviewed.get(f.abs)),

@@ -163,6 +163,8 @@ export interface ReviewFile {
   /** When each step ran, and the conversation ids of the requests that led to them. */
   stepTs: string[];
   requestIds: string[];
+  /** Each hunk's key (what it changes, not where), to recognise it after other edits. */
+  hunkKeys: string[];
   /** Where the file was last edited in the transcript, to order it against test runs. */
   lastSeq: number | null;
   /** Test evidence after the file's last edit (a test ran and how it came out; not what it covered). */
@@ -247,13 +249,41 @@ export interface SideMessage {
 }
 
 /**
+ * A hunk or file a side chat asks about, frozen when the question was asked: the exact diff, the
+ * steps that made it and what Claude said there, so the thread keeps its evidence after the code moves on.
+ */
+export interface ChangeRef {
+  abs: string;
+  path: string;
+  /** The hunk asked about, or null for the whole file. */
+  hunk: number | null;
+  /** Identifies the hunk by what it changes (see hunkKey); null for a whole file. */
+  hunkKey: string | null;
+  /** The file's net change when asked; a whole-file question is stale once it differs. */
+  fileHash: string;
+  /** The diff asked about, as unified-diff text. */
+  diff: string;
+  /** Lines it spans in the file after the change; null for a whole file. */
+  from: number | null;
+  to: number | null;
+  /** The edits that made it, and what Claude said just before the last of them. */
+  stepIds: string[];
+  note: string | null;
+  /** The request that led to it. */
+  request: string | null;
+  at: string;
+}
+
+/**
  * A side chat: a question about a chat, answered in a fork of it so the chat's own context never
  * sees it. The thread shows only the message it replies to, not the forked history.
  */
 export interface SideChat {
   id: string;
   sessionId: string;
-  anchor: { id: string | null; role: 'user' | 'assistant'; text: string };
+  anchor: { id: string | null; role: 'user' | 'assistant'; text: string; change?: ChangeRef | null };
+  /** For a change: the code changed since the question, so the answers may be out of date. */
+  stale: boolean;
   createdAt: string;
   messages: SideMessage[];
   /** An answer is being written. */
@@ -267,8 +297,8 @@ export interface SideChat {
 export interface SideAsk {
   /** Continue this thread; omitted to start one. */
   chatId?: string;
-  /** The message a new thread replies to. */
-  anchor?: { id: string | null; role: 'user' | 'assistant'; text: string };
+  /** The message (or change) a new thread replies to. */
+  anchor?: { id: string | null; role: 'user' | 'assistant'; text: string; change?: ChangeRef | null };
   text: string;
 }
 
@@ -355,6 +385,8 @@ export interface CompanionApi {
   /** Asks a side question (a new thread, or a follow-up). Resolves with the thread id once it starts. */
   askSide(sessionId: string, ask: SideAsk): Promise<Result<string>>;
   stopSide(chatId: string): void;
+  /** The same change as a thread asked about, as the code is now: to ask again on the latest revision. */
+  latestChange(sessionId: string, chatId: string): Promise<ChangeRef | null>;
   deleteSideChat(chatId: string): Promise<void>;
   /** A session's side chats changed (an answer streamed in, finished, or a thread was deleted). */
   onSideChanged(cb: (sessionId: string) => void): () => void;

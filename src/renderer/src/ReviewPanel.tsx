@@ -14,7 +14,8 @@ import typescript from 'highlight.js/lib/languages/typescript';
 import xml from 'highlight.js/lib/languages/xml';
 import yaml from 'highlight.js/lib/languages/yaml';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ReviewFile, ReviewView } from '../../shared/api';
+import type { ChangeRef, ReviewFile, ReviewView, SideChat } from '../../shared/api';
+import { changeRef } from '../../shared/changeRef';
 import { diffRows } from '../../shared/reviewRows';
 import { api } from './api';
 import { ReviewOverviewPane } from './ReviewOverview';
@@ -48,13 +49,6 @@ export function useReview(sessionId: string, open: boolean) {
   return { view, retry: () => load(true) };
 }
 
-/** What a hunk or file question is about: the code exactly as it is now, and where it came from. */
-export interface ChangeAnchor {
-  file: ReviewFile;
-  /** A hunk index, or null for the whole file. */
-  hunk: number | null;
-}
-
 export interface ReviewProps {
   sessionId: string;
   view: ReviewView | null;
@@ -63,8 +57,11 @@ export interface ReviewProps {
   onJump: (itemId: string) => void;
   /** Puts a message in the chat's composer, for you to edit and send. */
   onDraft: (text: string) => void;
-  /** Asks about a hunk or file in a side chat, without interrupting the chat. */
-  onAskChange?: (anchor: ChangeAnchor) => void;
+  /** Asks about a hunk or file (frozen as it is now) in a side chat, without interrupting the chat. */
+  onAskChange?: (change: ChangeRef) => void;
+  /** Side chats, to show the threads on each hunk and file. */
+  sideChats?: SideChat[];
+  onOpenSide?: (chatId: string) => void;
 }
 
 /**
@@ -143,10 +140,12 @@ export function ReviewPanel(props: ReviewProps) {
 }
 
 /** The diff, file by file, with each file's explanation, the edits that made it, and your review marks. */
-function Explore({ sessionId, view, onRetry, onJump, onAskChange, target }: ReviewProps & { view: ReviewView; target: { path: string; hunk?: number; at: number } | null }) {
+function Explore({ sessionId, view, onRetry, onJump, onAskChange, sideChats, onOpenSide, target }: ReviewProps & { view: ReviewView; target: { path: string; hunk?: number; at: number } | null }) {
   const cards = useRef(new Map<string, HTMLElement>());
   const { files } = view;
   const go = (path: string) => cards.current.get(path)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const reqText = new Map(view.requests.map((r) => [r.id, r.text]));
+  const threadsOf = (abs: string) => (sideChats ?? []).filter((c) => c.anchor.change?.abs === abs);
   const behaviorsOf = useMemo(() => {
     const m = new Map<string, string[]>();
     for (const b of view.overview?.behaviors ?? []) for (const p of b.files) m.set(p, [...(m.get(p) ?? []), b.title]);
@@ -222,7 +221,9 @@ function Explore({ sessionId, view, onRetry, onJump, onAskChange, target }: Revi
             onReviewed={(on) => void api.markReviewed(sessionId, f.abs, on)}
             onOpen={() => void api.openChangedFile(sessionId, f.abs)}
             onJump={onJump}
-            onAsk={onAskChange ? (hunk) => onAskChange({ file: f, hunk }) : undefined}
+            onAsk={onAskChange ? (hunk) => onAskChange(changeRef(f, hunk, reqText.get(f.requestIds.at(-1) ?? '') ?? null)) : undefined}
+            threads={threadsOf(f.abs)}
+            onOpenSide={onOpenSide}
             refEl={(el) => (el ? cards.current.set(f.path, el) : cards.current.delete(f.path))}
           />
         ))}
@@ -239,6 +240,8 @@ const FileCard = memo(function FileCard({
   onOpen,
   onJump,
   onAsk,
+  threads,
+  onOpenSide,
   refEl,
 }: {
   file: ReviewFile;
@@ -248,8 +251,11 @@ const FileCard = memo(function FileCard({
   onOpen: () => void;
   onJump: (itemId: string) => void;
   onAsk?: (hunk: number | null) => void;
+  threads: SideChat[];
+  onOpenSide?: (chatId: string) => void;
   refEl: (el: HTMLElement | null) => void;
 }) {
+  const fileThreads = threads.filter((c) => !c.anchor.change?.hunkKey);
   const lines = f.hunks.reduce((n, h) => n + h.lines.length, 0);
   const [unfold, setUnfold] = useState(false);
   const folded = lines > FOLD_LINES && !unfold;
@@ -266,6 +272,7 @@ const FileCard = memo(function FileCard({
         </span>
         <VerifyChip v={f.verification} compact />
         <span className="rf-actions">
+          <Threads chats={fileThreads} onOpen={onOpenSide} />
           {onAsk && (
             <button className="btn small" onClick={() => onAsk(null)} title="Ask about this file in a side chat; the chat keeps working">
               Ask about this file
@@ -315,7 +322,7 @@ const FileCard = memo(function FileCard({
               Show the diff ({lines.toLocaleString()} lines)
             </button>
           ) : (
-            <Diff file={f} onAsk={onAsk} />
+            <Diff file={f} onAsk={onAsk} threads={threads} onOpenSide={onOpenSide} />
           )}
         </>
       )}
@@ -323,7 +330,7 @@ const FileCard = memo(function FileCard({
   );
 });
 
-function Diff({ file: f, onAsk }: { file: ReviewFile; onAsk?: (hunk: number) => void }) {
+function Diff({ file: f, onAsk, threads, onOpenSide }: { file: ReviewFile; onAsk?: (hunk: number) => void; threads: SideChat[]; onOpenSide?: (chatId: string) => void }) {
   const lang = LANG[f.path.split('.').pop()?.toLowerCase() ?? ''];
   const rows = useMemo(() => diffRows(f, { headers: f.hunks.length > 1 || !!onAsk || f.review.state === 'changed' }), [f, onAsk]);
   const again = new Set(f.review.state === 'changed' ? f.review.changedHunks : []);
@@ -343,11 +350,14 @@ function Diff({ file: f, onAsk }: { file: ReviewFile; onAsk?: (hunk: number) => 
                     {r.from === r.to ? `Line ${r.from}` : `Lines ${r.from}–${r.to}`}
                     {again.has(r.hunk) && <span className="rn-again">needs another look</span>}
                   </span>
-                  {onAsk && (
-                    <button className="link hunk-ask" onClick={() => onAsk(r.hunk)} title="Ask about this change in a side chat; the chat keeps working">
-                      Ask about this change
-                    </button>
-                  )}
+                  <span className="hunk-acts">
+                    <Threads chats={threads.filter((c) => c.anchor.change?.hunkKey && c.anchor.change.hunkKey === f.hunkKeys[r.hunk])} onOpen={onOpenSide} />
+                    {onAsk && (
+                      <button className="link hunk-ask" onClick={() => onAsk(r.hunk)} title="Ask about this change in a side chat; the chat keeps working">
+                        Ask about this change
+                      </button>
+                    )}
+                  </span>
                 </td>
               </tr>
             ) : (
@@ -392,6 +402,20 @@ function Steps({ file: f, onJump }: { file: ReviewFile; onJump: (itemId: string)
         );
       })}
     </ol>
+  );
+}
+
+/** Links to the side threads on a hunk or file. */
+function Threads({ chats, onOpen }: { chats: SideChat[]; onOpen?: (chatId: string) => void }) {
+  if (!chats.length || !onOpen) return null;
+  return (
+    <>
+      {chats.map((c) => (
+        <button key={c.id} className="side-badge" onClick={() => onOpen(c.id)} title={c.messages[0]?.text}>
+          💬 {c.running ? 'answering…' : `${c.messages.filter((m) => m.role === 'assistant').length} repl${c.messages.filter((m) => m.role === 'assistant').length === 1 ? 'y' : 'ies'}`}
+        </button>
+      ))}
+    </>
   );
 }
 

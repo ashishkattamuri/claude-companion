@@ -257,4 +257,8 @@ export const MIGRATIONS: string[] = [
     files_json  TEXT NOT NULL      -- { abs: { hash, keys } }
   );
   `,
+  `
+  -- Side chats about a change: the hunk or file asked about, frozen as it was (diff, source step, time).
+  ALTER TABLE side_chats ADD COLUMN change_json TEXT;
+  `,
 ];

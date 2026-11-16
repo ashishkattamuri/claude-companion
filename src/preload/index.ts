@@ -45,6 +45,7 @@ const api: CompanionApi = {
   listSideChats: (id) => ipcRenderer.invoke('side:list', id),
   askSide: (id, ask) => ipcRenderer.invoke('side:ask', id, ask),
   stopSide: (chatId) => ipcRenderer.send('side:stop', chatId),
+  latestChange: (id, chatId) => ipcRenderer.invoke('side:latestChange', id, chatId),
   deleteSideChat: (chatId) => ipcRenderer.invoke('side:delete', chatId),
   onSideChanged: (cb) => subscribe('side:changed', cb),
   restartWithTools: (id) => ipcRenderer.invoke('session:restartWithTools', id),

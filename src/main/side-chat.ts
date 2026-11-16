@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { DB } from '../store/db.js';
-import type { Result, SideAsk, SideChat, SideMessage, SideUsage } from '../shared/api.js';
+import type { ChangeRef, Result, SideAsk, SideChat, SideMessage, SideUsage } from '../shared/api.js';
 import { findTranscript } from './transcript.js';
 
 /**
@@ -30,7 +30,11 @@ interface Running {
   proc: ChildProcess;
   partial: string;
   activity: string | null;
+  /** Why it was stopped, when Companion stopped it. */
+  blocked?: string;
 }
+
+const WRITE_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit']);
 
 /** How much of the replied-to message goes into the first question; the fork has the rest. */
 const ANCHOR_CHARS = 4000;
@@ -40,11 +44,20 @@ export class SideChats {
 
   constructor(private d: SideDeps) {}
 
-  list(sessionId: string): SideChat[] {
+  /** A session's threads. `stale` says whether a change a thread asked about has changed since. */
+  list(sessionId: string, stale: (c: ChangeRef) => boolean = () => false): SideChat[] {
     const chats = this.d.db
-      .prepare(`SELECT id, session_id, anchor_id, anchor_role, anchor_text, created_at FROM side_chats WHERE session_id = ? ORDER BY created_at`)
+      .prepare(`SELECT id, session_id, anchor_id, anchor_role, anchor_text, change_json, created_at FROM side_chats WHERE session_id = ? ORDER BY created_at`)
       .all(sessionId) as ChatRow[];
-    return chats.map((c) => this.view(c));
+    return chats.map((c) => {
+      const v = this.view(c);
+      return { ...v, stale: v.anchor.change ? stale(v.anchor.change) : false };
+    });
+  }
+
+  anchorOf(chatId: string): SideChat['anchor'] | null {
+    const c = this.row(chatId);
+    return c ? this.view(c).anchor : null;
   }
 
   /** Every fork id, so the scanner and sidebar can leave them out. */
@@ -75,10 +88,10 @@ export class SideChats {
       if (!ask.anchor) return { ok: false, error: 'Pick a message to ask about.' };
       chatId = randomUUID();
       this.d.db
-        .prepare(`INSERT INTO side_chats(id, session_id, anchor_id, anchor_role, anchor_text, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
-        .run(chatId, sessionId, ask.anchor.id, ask.anchor.role, ask.anchor.text, new Date().toISOString());
+        .prepare(`INSERT INTO side_chats(id, session_id, anchor_id, anchor_role, anchor_text, change_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .run(chatId, sessionId, ask.anchor.id, ask.anchor.role, ask.anchor.text, ask.anchor.change ? JSON.stringify(ask.anchor.change) : null, new Date().toISOString());
       args = ['--resume', sessionId, '--fork-session', '--session-id', chatId];
-      prompt = firstQuestion(ask.anchor, text);
+      prompt = ask.anchor.change ? changeQuestion(ask.anchor.change, text) : firstQuestion(ask.anchor, text);
     }
     this.addMessage(chatId, { role: 'user', text, ts: new Date().toISOString(), usage: null, error: null });
 
@@ -150,7 +163,11 @@ export class SideChats {
         if (ev.type === 'assistant') {
           for (const b of ev.message?.content ?? []) {
             if (b.type === 'text' && b.text) texts.push(b.text);
-            else if (b.type === 'tool_use') run.activity = describe(b.name ?? 'tool', b.input ?? {});
+            else if (b.type === 'tool_use' && WRITE_TOOLS.has(b.name ?? '')) {
+              // Side chats are read-only: stop one that starts changing files.
+              run.blocked = `Stopped: the side chat tried to change a file (${b.name}). Side chats only answer; ask in the chat to make changes.`;
+              run.proc.kill('SIGTERM');
+            } else if (b.type === 'tool_use') run.activity = describe(b.name ?? 'tool', b.input ?? {});
           }
           if (texts.length) run.partial = texts.join('\n\n');
           this.d.onChanged(run.sessionId);
@@ -171,7 +188,7 @@ export class SideChats {
       const r = result as { text: string; usage: SideUsage | null; error: string | null } | null;
       const lines = stderr.trim().split('\n');
       const crash = lines.find((l) => /error/i.test(l)) ?? lines.at(-1);
-      const error = r?.error ?? (stopped ? 'Stopped.' : r ? null : crash || `claude exited with code ${code}`);
+      const error = run.blocked ?? r?.error ?? (stopped ? 'Stopped.' : r ? null : crash || `claude exited with code ${code}`);
       const text = r?.text || run.partial;
       if (text || error) this.addMessage(chatId, { role: 'assistant', text, ts: new Date().toISOString(), usage: r?.usage ?? null, error });
       this.d.onChanged(run.sessionId);
@@ -186,7 +203,7 @@ export class SideChats {
 
   private row(chatId: string): ChatRow | undefined {
     return this.d.db
-      .prepare(`SELECT id, session_id, anchor_id, anchor_role, anchor_text, created_at FROM side_chats WHERE id = ?`)
+      .prepare(`SELECT id, session_id, anchor_id, anchor_role, anchor_text, change_json, created_at FROM side_chats WHERE id = ?`)
       .get(chatId) as ChatRow | undefined;
   }
 
@@ -204,7 +221,8 @@ export class SideChats {
     return {
       id: c.id,
       sessionId: c.session_id,
-      anchor: { id: c.anchor_id, role: c.anchor_role, text: c.anchor_text },
+      anchor: { id: c.anchor_id, role: c.anchor_role, text: c.anchor_text, change: parseChange(c.change_json) },
+      stale: false,
       createdAt: c.created_at,
       messages,
       running: !!run,
@@ -220,7 +238,17 @@ interface ChatRow {
   anchor_id: string | null;
   anchor_role: 'user' | 'assistant';
   anchor_text: string;
+  change_json: string | null;
   created_at: string;
+}
+
+function parseChange(json: string | null): ChangeRef | null {
+  if (!json) return null;
+  try {
+    return JSON.parse(json) as ChangeRef;
+  } catch {
+    return null;
+  }
 }
 
 interface StreamEvent {
@@ -242,6 +270,29 @@ export function firstQuestion(anchor: NonNullable<SideAsk['anchor']>, question: 
     "This is a separate thread, so just answer the question, briefly. Don't continue the main task and don't change any files.",
     question,
   ].join('\n\n');
+}
+
+/**
+ * The first message of a thread about a change: the exact diff as it was when asked, where it came
+ * from, and how to answer: recorded rationale apart from inference, no claims about tests that the
+ * conversation doesn't show, and no changes.
+ */
+export function changeQuestion(c: ChangeRef, question: string): string {
+  const where = c.hunk === null ? `the file ${c.path}` : `this change to ${c.path}${c.from ? ` (lines ${c.from}–${c.to} after the change)` : ''}`;
+  const diff = c.diff.length > ANCHOR_CHARS * 2 ? `${c.diff.slice(0, ANCHOR_CHARS * 2)}\n[…]` : c.diff;
+  return [
+    `I have a side question about ${where}, which you made earlier in our conversation above. This is the diff exactly as it was when I asked (${c.at}):`,
+    `<diff path="${c.path}">\n${diff}\n</diff>`,
+    c.note ? `What you said just before making it: "${c.note.slice(0, 600)}"` : '',
+    [
+      'This is a separate thread, so answer the question briefly and stay read-only: don\'t continue the main task and don\'t change any files.',
+      'Keep what was actually said or decided in our conversation apart from what you infer: quote or point to the conversation for the first, and mark the second "Inferred:".',
+      "Don't say tests cover or pass for this unless the conversation shows a test run and its result.",
+    ].join(' '),
+    question,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 function usageOf(ev: StreamEvent): SideUsage | null {
