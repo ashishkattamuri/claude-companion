@@ -2,6 +2,8 @@
 
 **Context and session management for Claude Code, to improve developer productivity and engineering workflows.**
 
+**[Download for macOS](https://github.com/ashishkattamuri/claude-companion/releases/latest)** · [Website](https://ashishkattamuri.github.io/claude-companion/) · [Demo video](https://www.youtube.com/watch?v=Em9um7jZJz0)
+
 Companion for Claude is an open-source desktop app around Claude Code. It keeps every Claude Code session in one window, shows what each session is carrying in its context, and gives you the tools to keep that context focused: notes, hand-offs, linked sub-sessions and side threads. Around that core it adds what a developer needs day to day (sessions grouped by what they need from you, a morning recap) and the building blocks for engineering workflows (reviewing a session's changes like a pull request, approvals, connectors).
 
 [![Watch the demo on YouTube: Companion for Claude](docs/media/demo-cover.jpg)](https://www.youtube.com/watch?v=Em9um7jZJz0)
@@ -63,7 +65,26 @@ Coming next: **Ideas** (follow-ups from your conversations, ready to run) and **
 
 ## Install
 
-Requires macOS, Node 20+ and [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
+Requires macOS 13 or later and [Claude Code](https://docs.anthropic.com/en/docs/claude-code), installed and signed in. Companion runs on your own Claude login; there's no API key.
+
+1. Download the app from the [latest release](https://github.com/ashishkattamuri/claude-companion/releases/latest): [Apple silicon](https://github.com/ashishkattamuri/claude-companion/releases/latest/download/Companion-for-Claude-arm64.dmg) or [Intel](https://github.com/ashishkattamuri/claude-companion/releases/latest/download/Companion-for-Claude-x64.dmg).
+2. Open the `.dmg` and drag **Companion for Claude** to Applications.
+3. Open it. The app isn't notarized by Apple yet, so the first time macOS blocks it: go to **System Settings → Privacy & Security** and click **Open Anyway**. Or clear the download flag in a terminal:
+
+   ```sh
+   xattr -dr com.apple.quarantine "/Applications/Companion for Claude.app"
+   ```
+
+The `companion` command ships inside the app and runs on the app's own Node. To put it on your PATH:
+
+```sh
+sudo ln -sf "/Applications/Companion for Claude.app/Contents/Resources/bin/companion" /usr/local/bin/companion
+companion                  # open the desktop app
+```
+
+### From source
+
+Requires Node 20+.
 
 ```sh
 git clone https://github.com/ashishkattamuri/claude-companion.git
@@ -115,6 +136,17 @@ npm run test:live         # the same against the real Claude Code CLI on Haiku (
 npm run test:live-branch  # notes and branching against the real CLI
 npm run test:live-side    # side chats against the real CLI
 ```
+
+### Packaging and releases
+
+```sh
+npm run dist:mac          # build and package the app into release/ (.dmg and .zip for this Mac's architecture)
+COMPANION_E2E_APP="release/mac-arm64/Companion for Claude.app" npm run test:e2e   # the e2e suite against the packaged app
+```
+
+Pushing a version tag (`git tag v0.1.0 && git push origin v0.1.0`) runs the [Release workflow](.github/workflows/release.yml): it packages the app for Apple silicon and Intel, runs the e2e suite against the packaged app and publishes a GitHub release. File names carry no version, so `releases/latest/download/Companion-for-Claude-arm64.dmg` always points at the newest build. The app is ad-hoc signed, not notarized.
+
+The website is [`docs/index.html`](docs/index.html), served by GitHub Pages from the `docs/` folder on `main`.
 
 ## Contributing
 

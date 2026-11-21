@@ -1,0 +1,42 @@
+appId: io.github.ashishkattamuri.companion
+productName: Companion for Claude
+copyright: Copyright © 2026 Ashish Kattamuri
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - out/**
+  - dist/**
+  - package.json
+  # Native modules: keep the macOS binaries, drop sources and other platforms' builds.
+  - '!node_modules/better-sqlite3/{deps,src}/**'
+  - '!node_modules/better-sqlite3/prebuilds/{linux,linuxmusl,win32}-*'
+  - '!node_modules/node-pty/{deps,src,third_party}/**'
+  - '!node_modules/node-pty/prebuilds/win32-*/**'
+
+# Unpacked so the bundled CLI and MCP server (run on the app's own Node) and the native
+# modules (better-sqlite3, node-pty) load from plain files.
+asar: false
+
+extraResources:
+  - from: build/companion
+    to: bin/companion
+
+mac:
+  category: public.app-category.developer-tools
+  icon: build/icon.icns
+  target:
+    - dmg
+    - zip
+  # Version-free file names, so releases/latest/download/<name> always points at the newest build.
+  # Ad-hoc signature: not notarized, so the first launch needs Open Anyway (see README).
+  identity: '-'
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  artifactName: Companion-for-Claude-${arch}-mac.${ext}
+
+dmg:
+  title: Companion for Claude ${version}
+  artifactName: Companion-for-Claude-${arch}.${ext}

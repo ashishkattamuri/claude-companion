@@ -1,0 +1,11 @@
+#!/bin/sh
+# The `companion` command, shipped inside Companion for Claude.app. Link it onto your PATH:
+#   sudo ln -sf "/Applications/Companion for Claude.app/Contents/Resources/bin/companion" /usr/local/bin/companion
+# It runs the CLI on the app's bundled Node, so no Node install is needed.
+self="$0"
+while [ -L "$self" ]; do
+  link=$(readlink "$self")
+  case "$link" in /*) self="$link" ;; *) self="$(dirname "$self")/$link" ;; esac
+done
+contents="$(cd "$(dirname "$self")/../.." && pwd)"
+ELECTRON_RUN_AS_NODE=1 exec "$contents/MacOS/Companion for Claude" "$contents/Resources/app/dist/cli.js" "$@"

@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Companion for Claude</title>
+<meta name="description" content="A free, open-source Mac app around Claude Code: see what fills each session's context and keep it focused with notes, hand-offs, linked sub-sessions and side chats.">
+<meta property="og:title" content="Companion for Claude">
+<meta property="og:description" content="Context and session management for Claude Code. Free and open source, for macOS.">
+<meta property="og:image" content="https://ashishkattamuri.github.io/claude-companion/media/demo-cover.jpg">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="apple-touch-icon" href="assets/icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f7f5f1;
+    --bg-2: #efece6;
+    --card: #ffffff;
+    --ink: #16181d;
+    --ink-2: #4a4f5a;
+    --faint: #7c818c;
+    --line: #e2ded6;
+    --accent: #2f5bea;
+    --accent-ink: #ffffff;
+    --accent-soft: #2f5bea14;
+    --green: #138a52;
+    --serif: 'Instrument Serif', Georgia, serif;
+    --sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+    --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+    --radius: 14px;
+    --max: 1120px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 400 17px/1.6 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  img, video { display: block; max-width: 100%; height: auto; }
+  .wrap { max-width: var(--max); margin: 0 auto; padding: 0 24px; }
+  .label {
+    font: 500 12px/1 var(--mono);
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+  h1, h2, h3 { font-weight: 400; margin: 0; }
+  h1, h2 { font-family: var(--serif); letter-spacing: -.01em; }
+  h1 em, h2 em { font-style: italic; }
+
+  /* Nav */
+  nav { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 86%, transparent); backdrop-filter: blur(12px); border-bottom: 1px solid transparent; transition: border-color .2s; }
+  nav.scrolled { border-color: var(--line); }
+  nav .wrap { display: flex; align-items: center; gap: 24px; height: 64px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; text-decoration: none; }
+  .brand img { width: 28px; height: 28px; }
+  nav .links { display: flex; gap: 22px; margin-left: auto; align-items: center; font-size: 15px; color: var(--ink-2); }
+  nav .links a { text-decoration: none; }
+  nav .links a:hover { color: var(--ink); }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 12px 20px; border-radius: 10px;
+    font: 500 15px/1.2 var(--sans); text-decoration: none;
+    border: 1px solid var(--line); background: var(--card); color: var(--ink);
+    transition: transform .15s, box-shadow .15s, background .15s;
+  }
+  .btn:hover { transform: translateY(-1px); box-shadow: 0 6px 18px #16181d14; }
+  .btn.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .btn.small { padding: 8px 14px; font-size: 14px; }
+  .btn svg { width: 18px; height: 18px; flex: none; }
+  .btn .sub { font-size: 12px; opacity: .7; font-weight: 400; display: block; }
+
+  /* Hero */
+  .hero { padding: 72px 0 40px; text-align: center; position: relative; overflow: hidden; }
+  .hero::before {
+    content: ''; position: absolute; inset: -20% -10% auto; height: 640px; z-index: -1;
+    background: radial-gradient(600px 300px at 20% 30%, #ffd9bf80, transparent 70%),
+                radial-gradient(600px 320px at 80% 20%, #d9e0ff99, transparent 70%);
+  }
+  .hero h1 { font-size: clamp(44px, 7vw, 84px); line-height: 1.02; max-width: 900px; margin: 18px auto 22px; }
+  .hero p.lead { font-size: clamp(17px, 2vw, 20px); color: var(--ink-2); max-width: 680px; margin: 0 auto 32px; }
+  .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .meta { margin-top: 16px; font-size: 14px; color: var(--faint); }
+  .meta a { color: var(--ink-2); }
+
+  /* App window frame */
+  .window {
+    margin: 56px auto 0; max-width: 1040px; border-radius: 12px; overflow: hidden;
+    background: var(--card); border: 1px solid var(--line);
+    box-shadow: 0 30px 80px -20px #16181d38, 0 8px 24px -8px #16181d1f;
+  }
+  .window .bar { height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 14px; background: #f1efeb; border-bottom: 1px solid var(--line); }
+  .window .bar i { width: 12px; height: 12px; border-radius: 50%; background: #e0dcd4; }
+  .window .bar i:nth-child(1) { background: #ff5f57; } .window .bar i:nth-child(2) { background: #febc2e; } .window .bar i:nth-child(3) { background: #28c840; }
+  .window .bar span { flex: 1; text-align: center; font-size: 12px; color: var(--faint); margin-right: 50px; }
+  .window video { width: 100%; aspect-ratio: 1440 / 864; background: var(--bg-2); }
+  .caption { text-align: center; font-size: 14px; color: var(--faint); margin-top: 14px; }
+
+  /* Problem */
+  section { padding: 96px 0; }
+  .problem { text-align: center; }
+  .problem h2 { font-size: clamp(32px, 4.4vw, 52px); line-height: 1.1; max-width: 860px; margin: 16px auto 22px; }
+  .problem p { max-width: 700px; margin: 0 auto; color: var(--ink-2); }
+
+  /* Chapters */
+  .chapter-head { display: flex; align-items: center; gap: 18px; margin-bottom: 40px; flex-wrap: wrap; }
+  .chip { font: 500 12px/1 var(--mono); letter-spacing: .12em; padding: 8px 12px; border-radius: 999px; background: var(--ink); color: #fff; }
+  .chapter-head h2 { font-size: clamp(34px, 4.4vw, 54px); line-height: 1.05; }
+  .chapter-head p { flex-basis: 100%; margin: 4px 0 0; color: var(--ink-2); max-width: 680px; }
+  .feature { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 48px; align-items: center; padding: 36px 0; }
+  .feature + .feature { border-top: 1px solid var(--line); }
+  .feature:nth-child(even) .text { order: 2; }
+  .feature h3 { font: 600 22px/1.3 var(--sans); margin: 10px 0 12px; }
+  .feature p { color: var(--ink-2); margin: 0 0 12px; }
+  .feature ul { margin: 0; padding-left: 20px; color: var(--ink-2); }
+  .feature li { margin: 4px 0; }
+  .clip { border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); background: var(--bg-2); box-shadow: 0 18px 50px -24px #16181d40; }
+  .clip video { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+  .alt { background: var(--card); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+
+  /* More */
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 36px; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; }
+  .tile h3 { font: 600 16px/1.35 var(--sans); margin: 0 0 6px; }
+  .tile p { margin: 0; font-size: 15px; color: var(--ink-2); }
+  .more h2, .install h2, .demo h2, .privacy h2 { font-size: clamp(32px, 4vw, 48px); line-height: 1.1; margin-top: 12px; }
+
+  /* Demo */
+  .demo { text-align: center; }
+  .demo a.cover { position: relative; display: block; max-width: 900px; margin: 36px auto 0; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); box-shadow: 0 24px 60px -24px #16181d50; }
+  .demo a.cover::after { content: ''; position: absolute; inset: 0; background: #16181d22; transition: background .2s; }
+  .demo a.cover:hover::after { background: #16181d10; }
+  .play { position: absolute; z-index: 1; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 84px; height: 84px; border-radius: 50%; background: #fff; display: grid; place-items: center; box-shadow: 0 10px 30px #0004; }
+  .play svg { width: 30px; height: 30px; margin-left: 5px; fill: var(--ink); }
+
+  /* Install */
+  .steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 36px; counter-reset: step; }
+  .step { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; }
+  .step::before { counter-increment: step; content: '0' counter(step); font: 500 12px/1 var(--mono); letter-spacing: .12em; color: var(--accent); }
+  .step h3 { font: 600 17px/1.35 var(--sans); margin: 12px 0 8px; }
+  .step p { margin: 0 0 10px; font-size: 15px; color: var(--ink-2); }
+  .step .btn { margin-top: 6px; }
+  code, pre { font: 400 13.5px/1.55 var(--mono); }
+  code { background: var(--bg-2); padding: 2px 6px; border-radius: 5px; word-break: break-word; }
+  pre { background: #16181d; color: #e7eaf0; padding: 14px 16px; border-radius: 10px; margin: 10px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12.5px; }
+  pre .c { color: #8b93a3; }
+  .note { margin-top: 20px; padding: 18px 20px; border-radius: var(--radius); background: var(--accent-soft); border: 1px solid #2f5bea29; font-size: 15px; color: var(--ink-2); }
+  .note strong { color: var(--ink); }
+
+  /* Privacy */
+  .privacy .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: start; }
+  .privacy p { color: var(--ink-2); }
+  .checks { list-style: none; padding: 0; margin: 0; }
+  .checks li { padding: 12px 0 12px 32px; border-bottom: 1px solid var(--line); position: relative; color: var(--ink-2); }
+  .checks li::before { content: ''; position: absolute; left: 4px; top: 18px; width: 14px; height: 8px; border-left: 2px solid var(--green); border-bottom: 2px solid var(--green); transform: rotate(-45deg); }
+
+  /* Final CTA + footer */
+  .final { text-align: center; }
+  .final h2 { font-size: clamp(36px, 5vw, 60px); line-height: 1.05; margin-bottom: 28px; }
+  footer { border-top: 1px solid var(--line); padding: 32px 0 48px; font-size: 14px; color: var(--faint); }
+  footer .wrap { display: flex; gap: 24px; flex-wrap: wrap; justify-content: space-between; }
+  footer a { color: var(--ink-2); }
+
+  @media (max-width: 860px) {
+    section { padding: 72px 0; }
+    .feature { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+    .feature:nth-child(even) .text { order: 0; }
+    .grid, .steps { grid-template-columns: minmax(0, 1fr); }
+    .privacy .cols { grid-template-columns: 1fr; gap: 12px; }
+    nav .links a.hide-sm { display: none; }
+  }
+  @media (max-width: 560px) {
+    .wrap { padding: 0 16px; }
+    .hero { padding-top: 48px; }
+    .window .bar span { display: none; }
+    .btn { width: 100%; justify-content: center; }
+    nav .btn { width: auto; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .btn { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<nav id="nav">
+  <div class="wrap">
+    <a class="brand" href="#"><img src="assets/icon.png" alt="">Companion for Claude</a>
+    <div class="links">
+      <a class="hide-sm" href="#features">Features</a>
+      <a class="hide-sm" href="#install">Install</a>
+      <a class="hide-sm" href="https://github.com/ashishkattamuri/claude-companion">GitHub</a>
+      <a class="btn small primary" href="#install">Download</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="label">Free &amp; open source · for macOS</div>
+    <h1>Keep every Claude Code session <em>focused.</em></h1>
+    <p class="lead">Companion for Claude is a desktop app around Claude Code. It keeps every session in one window, shows what each one carries in its context, and gives you the tools to keep it lean: notes, hand-offs, linked sub-sessions and side chats.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/ashishkattamuri/claude-companion/releases/latest/download/Companion-for-Claude-arm64.dmg">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.6c0-2.4 2-3.6 2.1-3.7-1.1-1.7-2.9-1.9-3.5-1.9-1.5-.2-2.9.9-3.7.9-.8 0-1.9-.9-3.2-.8-1.6 0-3.1 1-4 2.4-1.7 3-.4 7.4 1.2 9.8.8 1.2 1.8 2.5 3 2.4 1.2 0 1.7-.8 3.1-.8 1.5 0 1.9.8 3.2.8 1.3 0 2.2-1.2 3-2.4.9-1.4 1.3-2.7 1.3-2.8-.1 0-2.5-.9-2.5-3.9zM14 5.5c.7-.8 1.1-1.9 1-3-1 0-2.1.7-2.8 1.5-.6.7-1.2 1.8-1 2.9 1 .1 2.1-.6 2.8-1.4z"/></svg>
+        <span>Download for Mac<span class="sub">Apple silicon</span></span>
+      </a>
+      <a class="btn" href="https://github.com/ashishkattamuri/claude-companion/releases/latest/download/Companion-for-Claude-x64.dmg">
+        <span>Download for Mac<span class="sub">Intel</span></span>
+      </a>
+      <a class="btn" href="https://github.com/ashishkattamuri/claude-companion">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.6 22.4c.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.9 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.2c0 .3.2.7.8.6A11.5 11.5 0 0 0 12 .5z"/></svg>
+        <span>View on GitHub</span>
+      </a>
+    </div>
+    <div class="meta"><span id="version">Latest release</span> · macOS 13 or later · uses your own <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a> login</div>
+
+    <div class="window">
+      <div class="bar"><i></i><i></i><i></i><span>Companion for Claude</span></div>
+      <video data-src="assets/hero-branching.mp4" poster="assets/hero-branching.jpg" muted loop playsinline preload="none" aria-label="Asking Claude to open a separate chat for a workstream opens a new linked session"></video>
+    </div>
+    <p class="caption">Real recording. “Open a separate chat for the caching workstream” opens a linked session that already knows the plan.</p>
+  </div>
+</header>
+
+<section class="problem">
+  <div class="wrap">
+    <div class="label">Why</div>
+    <h2>Long sessions get slower, pricier and <em>less accurate</em> as their context fills up.</h2>
+    <p>One chat rarely stays one topic. Forty messages later the plan you made is buried under detours, every turn pays for all of it again, and when the session ends its decisions sit in a transcript nobody reads. Companion treats context as something you manage: see it, keep it focused, split it when the work splits, and carry what matters into the next session.</p>
+  </div>
+</section>
+
+<section class="alt" id="features">
+  <div class="wrap">
+    <div class="chapter-head">
+      <span class="chip">01 SEE</span>
+      <h2>Know what each session <em>is carrying.</em></h2>
+    </div>
+
+    <div class="features">
+      <div class="feature">
+        <div class="text">
+          <div class="label">Context window</div>
+          <h3>See what fills the context</h3>
+          <p>A meter sized to the model's real limit, broken down from Claude Code's own <code>/context</code>: system prompt, tools, MCP tools, skills, messages and the autocompact buffer.</p>
+          <p>Compact with a focus, and pin the files the work depends on so they survive compacting.</p>
+        </div>
+        <div class="clip"><video data-src="assets/clips/05-context-window.mp4" poster="assets/clips/05-context-window.jpg" muted loop playsinline preload="none"></video></div>
+      </div>
+      <div class="feature">
+        <div class="text">
+          <div class="label">Prompt cache</div>
+          <h3>Know when a turn reprocesses everything</h3>
+          <p>See how long the cache stays warm, what a cold resume costs, and why a turn missed it: a model switch, expiry, compaction or a tools change. Companion warns before an action would break the cache for running chats.</p>
+        </div>
+        <div class="clip"><video data-src="assets/clips/17-cache-misses.mp4" poster="assets/clips/17-cache-misses.jpg" muted loop playsinline preload="none"></video></div>
+      </div>
+      <div class="feature">
+        <div class="text">
+          <div class="label">Audit</div>
+          <h3>Find where the tokens went</h3>
+          <p>Files read again and again, approaches retried after they failed, full test suites run when one test would do. Each finding comes with its cost, its likely cause in your setup and a fix, confirmed by a second model.</p>
+        </div>
+        <div class="clip"><video data-src="assets/clips/06-audit.mp4" poster="assets/clips/06-audit.jpg" muted loop playsinline preload="none"></video></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="chapter-head">
+      <span class="chip">02 STEER</span>
+      <h2>Split the context when <em>the work splits.</em></h2>
+    </div>
+
+    <div class="features">
+      <div class="feature">
+        <div class="text">
+          <div class="label">Sub-sessions</div>
+          <h3>Branch into linked chats</h3>
+          <ul>
+            <li>Say “open a separate chat for…” and a new session starts on it right away.</li>
+            <li>It knows the parent's notes and recent exchanges as background, so its own thread stays clean.</li>
+            <li>It can look up any detail from the earlier chat, word for word.</li>
+            <li>The parent becomes a decision log of every chat opened from it.</li>
+          </ul>
+        </div>
+        <div class="clip"><video data-src="assets/clips/07-sub-sessions.mp4" poster="assets/clips/07-sub-sessions.jpg" muted loop playsinline preload="none"></video></div>
+      </div>
+      <div class="feature">
+        <div class="text">
+          <div class="label">Side chats</div>
+          <h3>Ask on the side</h3>
+          <p>Ask about any message in a thread beside the chat. Claude answers with the whole conversation in mind, but nothing you ask is added to it, so the chat doesn't grow. Answers come from a fork that reads from the prompt cache, and show their cost.</p>
+        </div>
+        <div class="clip"><video data-src="assets/clips/09-side-chats.mp4" poster="assets/clips/09-side-chats.jpg" muted loop playsinline preload="none"></video></div>
+      </div>
+      <div class="feature">
+        <div class="text">
+          <div class="label">Notes &amp; hand-off</div>
+          <h3>Carry decisions forward, not transcripts</h3>
+          <p>After each turn Companion keeps a Markdown notes file: the goal, decisions with their reasons, paths, commands, errors and fixes. When a session runs long, <strong>Hand off</strong> opens a fresh one from the notes and pinned files.</p>
+        </div>
+        <div class="clip"><video data-src="assets/clips/10-notes-and-handoff.mp4" poster="assets/clips/10-notes-and-handoff.jpg" muted loop playsinline preload="none"></video></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="alt">
+  <div class="wrap">
+    <div class="chapter-head">
+      <span class="chip">03 TRUST</span>
+      <h2>Every session in one window, <em>every change reviewed.</em></h2>
+    </div>
+
+    <div class="features">
+      <div class="feature">
+        <div class="text">
+          <div class="label">Sessions</div>
+          <h3>Grouped by what they need from you</h3>
+          <p>Live and recent sessions from all your projects: <em>Needs you</em>, <em>Running</em> and <em>Earlier</em>. A session stuck on a question moves to the top, and permission prompts can be answered right in the conversation.</p>
+        </div>
+        <div class="clip"><video data-src="assets/clips/01-session-groups.mp4" poster="assets/clips/01-session-groups.jpg" muted loop playsinline preload="none"></video></div>
+      </div>
+      <div class="feature">
+        <div class="text">
+          <div class="label">Review</div>
+          <h3>Review a session like a pull request</h3>
+          <p>One net diff per file, a short explanation of why it changed, and Claude's own words beside each edit with a link to that moment in the chat. Built from the session's record, not git, so it shows exactly what the AI changed.</p>
+        </div>
+        <div class="clip"><video data-src="assets/clips/13-review.mp4" poster="assets/clips/13-review.jpg" muted loop playsinline preload="none"></video></div>
+      </div>
+      <div class="feature">
+        <div class="text">
+          <div class="label">Terminal sync</div>
+          <h3>Drive a session from anywhere</h3>
+          <p>Sessions run as Claude Code background sessions. Type in Companion, its terminal pane, or any terminal attached with <code>claude attach</code>: it's one live session, and every place shows the same thing.</p>
+        </div>
+        <div class="clip"><video data-src="assets/clips/11-terminal-sync.mp4" poster="assets/clips/11-terminal-sync.jpg" muted loop playsinline preload="none"></video></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="more">
+  <div class="wrap">
+    <div class="label">And more</div>
+    <h2>Built for <em>real, long-running</em> work.</h2>
+    <div class="grid">
+      <div class="tile"><h3>Search everything</h3><p>Full-text search across everything you and Claude wrote, in every project.</p></div>
+      <div class="tile"><h3>Every step, not just the answer</h3><p>Each tool call as a step you can expand to the exact diff or command output.</p></div>
+      <div class="tile"><h3>Morning recap</h3><p>Yesterday's work by project, with blockers and action items, and a jump back into the session.</p></div>
+      <div class="tile"><h3>New sessions with guardrails</h3><p>Pick the model, plan first, ask before edits, and work in its own git worktree.</p></div>
+      <div class="tile"><h3>Compaction history</h3><p>Where each compaction happened, its before and after size, and the summary Claude works from.</p></div>
+      <div class="tile"><h3>Heaviest in context</h3><p>The biggest tool results Claude still carries, with a jump to each and “Compact without these”.</p></div>
+      <div class="tile"><h3>Connectors</h3><p>Browse and manage Claude Code's plugins, marketplaces and MCP servers in one place.</p></div>
+      <div class="tile"><h3>Branch from any terminal</h3><p>Register the branching tool once and every Claude Code session can open a linked chat.</p></div>
+      <div class="tile"><h3>A CLI too</h3><p><code>companion recap</code>, <code>companion audit &lt;id&gt;</code> and <code>companion doctor</code> from your terminal.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="demo alt">
+  <div class="wrap">
+    <div class="label">Demo · 4:40</div>
+    <h2>Watch it run <em>real sessions.</em></h2>
+    <a class="cover" href="https://www.youtube.com/watch?v=Em9um7jZJz0" aria-label="Watch the demo on YouTube">
+      <img src="media/demo-cover.jpg" alt="Companion for Claude demo video" width="1280" height="720">
+      <span class="play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4l15 8-15 8z"/></svg></span>
+    </a>
+  </div>
+</section>
+
+<section class="install" id="install">
+  <div class="wrap">
+    <div class="label">Install</div>
+    <h2>Up and running in <em>a minute.</em></h2>
+    <div class="steps">
+      <div class="step">
+        <h3>Download and drag to Applications</h3>
+        <p>You need <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a> installed and signed in. Companion runs on your own login, so there's no API key.</p>
+        <a class="btn small primary" href="https://github.com/ashishkattamuri/claude-companion/releases/latest/download/Companion-for-Claude-arm64.dmg">Apple silicon (.dmg)</a>
+        <a class="btn small" href="https://github.com/ashishkattamuri/claude-companion/releases/latest/download/Companion-for-Claude-x64.dmg">Intel (.dmg)</a>
+      </div>
+      <div class="step">
+        <h3>Open it the first time</h3>
+        <p>The app isn't notarized by Apple yet, so macOS asks once. Open it, then go to <strong>System Settings → Privacy &amp; Security</strong> and click <strong>Open Anyway</strong>. Or run:</p>
+        <pre>xattr -dr com.apple.quarantine \
+  "/Applications/Companion for Claude.app"</pre>
+      </div>
+      <div class="step">
+        <h3>Optional: the <code>companion</code> command</h3>
+        <p>The CLI ships inside the app. Link it onto your PATH:</p>
+        <pre>sudo ln -sf "/Applications/Companion for Claude.app/Contents/Resources/bin/companion" /usr/local/bin/companion
+<span class="c"># let every Claude session branch</span>
+companion tools install</pre>
+      </div>
+    </div>
+    <div class="note"><strong>Prefer to build it yourself?</strong> Clone the repo, then <code>npm install &amp;&amp; npm run build &amp;&amp; npm link</code>, or <code>npm run dist:mac</code> to make the .dmg. See the <a href="https://github.com/ashishkattamuri/claude-companion#install">README</a>.</div>
+  </div>
+</section>
+
+<section class="privacy alt">
+  <div class="wrap cols">
+    <div>
+      <div class="label">Privacy</div>
+      <h2>Everything stays <em>on your machine.</em></h2>
+      <p>Companion reads Claude Code's transcripts into a local SQLite database. Summaries, notes, reviews and audits run through <code>claude -p</code> on your own login, isolated and capped per run.</p>
+    </div>
+    <ul class="checks">
+      <li>No account, no server, no telemetry</li>
+      <li>Model calls run with no tools, hooks or MCP servers, and aren't saved as sessions</li>
+      <li>Opt whole projects out with a glob in a config file</li>
+      <li><code>companion doctor</code> shows how many model calls were made</li>
+      <li>MIT licensed: read every line</li>
+    </ul>
+  </div>
+</section>
+
+<section class="final">
+  <div class="wrap">
+    <h2>Give your sessions <em>room to think.</em></h2>
+    <div class="cta">
+      <a class="btn primary" href="#install">Download for Mac</a>
+      <a class="btn" href="https://github.com/ashishkattamuri/claude-companion">Star on GitHub</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>Companion for Claude · MIT License · <a href="https://github.com/ashishkattamuri/claude-companion">GitHub</a> · <a href="https://github.com/ashishkattamuri/claude-companion/issues">Issues</a></span>
+    <span>An independent project, not affiliated with or endorsed by Anthropic.</span>
+  </div>
+</footer>
+
+<script>
+  // Clips load and play only while on screen; with reduced motion they wait for a click.
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const load = (v) => { if (!v.src) v.src = v.dataset.src; };
+  const videos = document.querySelectorAll('video[data-src]');
+  if (reduce) {
+    videos.forEach((v) => { v.controls = true; load(v); });
+  } else if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        const v = e.target;
+        if (e.isIntersecting) { load(v); v.play().catch(() => {}); } else v.pause();
+      }
+    }, { rootMargin: '200px 0px' });
+    videos.forEach((v) => io.observe(v));
+  } else {
+    videos.forEach((v) => { load(v); v.autoplay = true; });
+  }
+
+  const nav = document.getElementById('nav');
+  addEventListener('scroll', () => nav.classList.toggle('scrolled', scrollY > 8), { passive: true });
+
+  fetch('https://api.github.com/repos/ashishkattamuri/claude-companion/releases/latest')
+    .then((r) => (r.ok ? r.json() : null))
+    .then((r) => { if (r && r.tag_name) document.getElementById('version').textContent = r.tag_name; })
+    .catch(() => {});
+</script>
+</body>
+</html>

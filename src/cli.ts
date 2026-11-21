@@ -20,7 +20,7 @@ import { openDb } from './store/db.js';
 
 const program = new Command()
   .name('companion')
-  .description('A chief of staff for your engineering work, built on Claude Code')
+  .description('Context and session management for Claude Code')
   .action(() => {
     // Open the desktop app, detached so this terminal is free again.
     const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');

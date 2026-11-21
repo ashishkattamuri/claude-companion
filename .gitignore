@@ -4,3 +4,4 @@ dist/
 temp.txt
 test/e2e/screenshots/
 out/
+release/

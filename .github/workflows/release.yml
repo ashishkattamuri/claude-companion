@@ -1,0 +1,48 @@
+name: Release
+
+# Push a tag like v0.1.0 to build the macOS app for Apple silicon and Intel, check the
+# Apple silicon build with the offline e2e suite, and publish both to a GitHub release.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mac:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      - name: Package (Apple silicon)
+        run: npx electron-builder --mac --arm64 --publish never
+      - name: End-to-end check of the packaged app
+        run: node test/e2e/run.mjs
+        env:
+          COMPANION_E2E_APP: release/mac-arm64/Companion for Claude.app
+      - name: Package (Intel)
+        run: npx electron-builder --mac --x64 --publish never
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "Companion for Claude ${GITHUB_REF_NAME#v}" --generate-notes \
+            release/Companion-for-Claude-arm64.dmg release/Companion-for-Claude-x64.dmg \
+            release/Companion-for-Claude-arm64-mac.zip release/Companion-for-Claude-x64-mac.zip
+      - uses: actions/upload-artifact@v4
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        with:
+          name: mac-builds
+          path: release/*.dmg

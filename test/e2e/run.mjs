@@ -1,14 +1,19 @@
 // Offline end-to-end check of the built app: no login, no model calls. A fake `claude`
 // (fake-claude.mjs) writes transcripts and registry files into an isolated Claude folder.
 // Usage: npm run build && npm run test:e2e   (screenshots land in test/e2e/screenshots/)
+// Packaged app: npm run dist:mac && COMPANION_E2E_APP="release/mac-arm64/Companion for Claude.app" npm run test:e2e
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { _electron as electron } from 'playwright';
 
 const repo = fileURLToPath(new URL('../..', import.meta.url));
+// With COMPANION_E2E_APP, the same checks run against a packaged .app: its own binary, its bundled
+// `companion` command and the CLI inside its Resources.
+const packaged = process.env.COMPANION_E2E_APP ? resolve(process.env.COMPANION_E2E_APP) : null;
+const packagedBin = packaged && join(packaged, 'Contents/MacOS', readdirSync(join(packaged, 'Contents/MacOS'))[0]);
 const shots = join(repo, 'test/e2e/screenshots');
 mkdirSync(shots, { recursive: true });
 
@@ -80,15 +85,18 @@ const until = async (fn, ms = 10000) => {
 // The built CLI runs on Electron's Node: the launcher, and the MCP server Claude sessions start.
 {
   const { spawnSync } = await import('node:child_process');
-  const launcher = spawnSync(process.execPath, [join(repo, 'bin/companion.js'), '--help'], { encoding: 'utf8', env });
+  const launcher = packaged
+    ? spawnSync(join(packaged, 'Contents/Resources/bin/companion'), ['--help'], { encoding: 'utf8', env })
+    : spawnSync(process.execPath, [join(repo, 'bin/companion.js'), '--help'], { encoding: 'utf8', env });
   check('the companion command runs on Electron\'s Node', launcher.status === 0 && launcher.stdout.includes('scan'));
-  const electronBin = (await import('node:module')).createRequire(import.meta.url)('electron');
+  const electronBin = packagedBin ?? (await import('node:module')).createRequire(import.meta.url)('electron');
+  const cliJs = packaged ? join(packaged, 'Contents/Resources/app/dist/cli.js') : join(repo, 'dist/cli.js');
   const init = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}\n';
-  const mcp = spawnSync(electronBin, [join(repo, 'dist/cli.js'), 'mcp'], { input: init, encoding: 'utf8', env: { ...env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 15000 });
+  const mcp = spawnSync(electronBin, [cliJs, 'mcp'], { input: init, encoding: 'utf8', env: { ...env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 15000 });
   check('the MCP server starts and answers', mcp.stdout.includes('"name":"companion"'));
 }
 
-const app = await electron.launch({ args: [repo], env });
+const app = await electron.launch(packaged ? { executablePath: packagedBin, args: [], env } : { args: [repo], env });
 try {
   const page = await app.firstWindow();
   await page.setViewportSize({ width: 1440, height: 900 });

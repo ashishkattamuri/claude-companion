@@ -1,9 +1,15 @@
 {
   "name": "claude-companion",
-  "version": "0.0.1",
-  "description": "A chief of staff for your engineering work, built on Claude Code",
+  "version": "0.1.0",
+  "description": "Context and session management for Claude Code",
   "type": "module",
   "license": "MIT",
+  "author": "Ashish Kattamuri",
+  "homepage": "https://ashishkattamuri.github.io/claude-companion/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ashishkattamuri/claude-companion.git"
+  },
   "bin": {
     "companion": "bin/companion.js"
   },
@@ -13,6 +19,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build && tsup src/cli.ts --format esm --target node22 --clean",
+    "dist:mac": "npm run build && electron-builder --mac --publish never && electron-rebuild -f -w better-sqlite3,node-pty",
     "app": "electron .",
     "typecheck": "tsc --noEmit && tsc --noEmit -p src/renderer",
     "test": "ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs run",
@@ -50,6 +57,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^44.5.1",
+    "electron-builder": "^26.18.0",
     "electron-vite": "^5.0.0",
     "playwright": "^1.63.0",
     "tsup": "^8.5.1",
