@@ -1,10 +1,16 @@
 # Companion for Claude
 
-**Context and session management for Claude Code, to improve developer productivity and engineering workflows.**
+**Long agent sessions, without the rot.**
 
 **[Download for macOS](https://github.com/ashishkattamuri/claude-companion/releases/latest)** · [Website](https://ashishkattamuri.github.io/claude-companion/) · [Demo video](https://www.youtube.com/watch?v=Em9um7jZJz0)
 
-Companion for Claude is an open-source desktop app around Claude Code. It keeps every Claude Code session in one window, shows what each session is carrying in its context, and gives you the tools to keep that context focused: notes, hand-offs, linked sub-sessions and side threads. Around that core it adds what a developer needs day to day (sessions grouped by what they need from you, a morning recap) and the building blocks for engineering workflows (reviewing a session's changes like a pull request, approvals, connectors).
+Coding agents get slower, costlier and more forgetful as a session grows. After a compaction the reasons behind your decisions are gone, every turn pays to re-read the whole history, and a new chat starts from zero. Companion for Claude is an open-source Mac app that keeps each session focused and carries your decisions into the next one, so the sixth hour is as sharp as the first.
+
+- **See it before it hurts.** What fills the context, what the next turn will cost, and where tokens go to waste.
+- **Split the work, keep the memory.** Branch a new topic into a linked chat that already knows the plan; ask side questions without growing the chat.
+- **Pick up exactly where you left off.** Living notes with every decision and why, hand-off to a fresh session, and a morning recap.
+
+Works with [Claude Code](https://docs.anthropic.com/en/docs/claude-code), on your own login. Everything stays on your Mac.
 
 [![Watch the demo on YouTube: Companion for Claude](docs/media/demo-cover.jpg)](https://www.youtube.com/watch?v=Em9um7jZJz0)
 
@@ -16,7 +22,7 @@ Companion for Claude is an open-source desktop app around Claude Code. It keeps 
 
 ## Why
 
-Long Claude Code sessions get slower, more expensive and less accurate as their context fills up. One chat rarely stays one topic: forty messages later the plan you made is buried under detours, every later turn pays for all of it again, and when the session ends, its decisions sit in a transcript nobody reads. Opening a new chat by hand loses everything you already worked out, and nothing connects the chats afterwards.
+Long agent sessions get slower, more expensive and less accurate as their context fills up. One chat rarely stays one topic: forty messages later the plan you made is buried under detours, every later turn pays for all of it again, and when the session ends, its decisions sit in a transcript nobody reads. Opening a new chat by hand loses everything you already worked out, and nothing connects the chats afterwards.
 
 Companion treats context as something you manage: you can see it, keep it focused, split it when the work splits, and carry what matters into the next session.
 

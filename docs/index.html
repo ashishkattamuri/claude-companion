@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Companion for Claude</title>
-<meta name="description" content="A free, open-source Mac app around Claude Code: see what fills each session's context and keep it focused with notes, hand-offs, linked sub-sessions and side chats.">
+<meta name="description" content="Coding agents get slower, costlier and more forgetful as a session grows. Companion for Claude keeps each session focused and carries your decisions into the next one. Works with Claude Code.">
 <meta property="og:title" content="Companion for Claude">
-<meta property="og:description" content="Context and session management for Claude Code. Free and open source, for macOS.">
+<meta property="og:description" content="Long agent sessions, without the rot. Works with Claude Code. Free and open source, for macOS.">
 <meta property="og:image" content="https://ashishkattamuri.github.io/claude-companion/media/demo-cover.jpg">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
@@ -190,6 +190,35 @@
     html { scroll-behavior: auto; }
     .btn { transition: none; }
   }
+
+  /* Problem cards */
+  .symptoms { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 40px; text-align: left; }
+  .symptom { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 26px; }
+  .symptom q { display: block; font: 400 26px/1.2 var(--serif); font-style: italic; color: var(--ink); margin-bottom: 14px; quotes: '“' '”'; }
+  .symptom p { margin: 0; font-size: 15px; color: var(--ink-2); }
+  .footnote { margin-top: 22px; font-size: 14px; color: var(--faint); }
+  .footnote a { color: var(--ink-2); }
+  .how .tags { font: 500 12px/1.6 var(--mono); letter-spacing: .06em; color: var(--faint); margin-top: 14px; }
+  .num { font: 500 13px/1 var(--mono); color: var(--accent); letter-spacing: .1em; }
+  .feature h3.big { font: 400 clamp(30px, 3.4vw, 40px)/1.08 var(--serif); margin: 12px 0 14px; }
+  /* Before / after */
+  .compare { margin-top: 40px; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--card); }
+  .compare .row { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 2fr) minmax(0, 2fr); border-top: 1px solid var(--line); }
+  .compare .row:first-child { border-top: 0; background: var(--bg-2); }
+  .compare .row > div { padding: 16px 20px; font-size: 15px; }
+  .compare .row:first-child > div { font: 500 12px/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
+  .compare .k { font-weight: 600; }
+  .compare .before { color: var(--faint); }
+  .compare .after { color: var(--ink); }
+  .compare .after::before { content: '→ '; color: var(--accent); }
+  @media (max-width: 860px) {
+    .symptoms { grid-template-columns: minmax(0, 1fr); }
+    .compare .row { grid-template-columns: minmax(0, 1fr); }
+    .compare .row:first-child { display: none; }
+    .compare .row > div { padding: 6px 18px; }
+    .compare .k { padding-top: 16px !important; }
+    .compare .after { padding-bottom: 16px !important; }
+  }
 </style>
 </head>
 <body>
@@ -198,8 +227,8 @@
   <div class="wrap">
     <a class="brand" href="#"><img src="assets/icon.png" alt="">Companion for Claude</a>
     <div class="links">
-      <a class="hide-sm" href="#features">Features</a>
-      <a class="hide-sm" href="#install">Install</a>
+      <a class="hide-sm" href="#problem">Why</a>
+      <a class="hide-sm" href="#how">How it works</a>
       <a class="hide-sm" href="https://github.com/ashishkattamuri/claude-companion">GitHub</a>
       <a class="btn small primary" href="#install">Download</a>
     </div>
@@ -208,111 +237,66 @@
 
 <header class="hero">
   <div class="wrap">
-    <div class="label">Free &amp; open source · for macOS</div>
-    <h1>Keep every Claude Code session <em>focused.</em></h1>
-    <p class="lead">Companion for Claude is a desktop app around Claude Code. It keeps every session in one window, shows what each one carries in its context, and gives you the tools to keep it lean: notes, hand-offs, linked sub-sessions and side chats.</p>
+    <div class="label">For long coding-agent sessions</div>
+    <h1>Long agent sessions, <em>without the rot.</em></h1>
+    <p class="lead">Coding agents get slower, costlier and more forgetful as a session grows. Companion keeps each session focused and carries your decisions into the next one, so the sixth hour is as sharp as the first.</p>
     <div class="cta">
-      <a class="btn primary" href="https://github.com/ashishkattamuri/claude-companion/releases/latest/download/Companion-for-Claude-arm64.dmg">
-        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.6c0-2.4 2-3.6 2.1-3.7-1.1-1.7-2.9-1.9-3.5-1.9-1.5-.2-2.9.9-3.7.9-.8 0-1.9-.9-3.2-.8-1.6 0-3.1 1-4 2.4-1.7 3-.4 7.4 1.2 9.8.8 1.2 1.8 2.5 3 2.4 1.2 0 1.7-.8 3.1-.8 1.5 0 1.9.8 3.2.8 1.3 0 2.2-1.2 3-2.4.9-1.4 1.3-2.7 1.3-2.8-.1 0-2.5-.9-2.5-3.9zM14 5.5c.7-.8 1.1-1.9 1-3-1 0-2.1.7-2.8 1.5-.6.7-1.2 1.8-1 2.9 1 .1 2.1-.6 2.8-1.4z"/></svg>
-        <span>Download for Mac<span class="sub">Apple silicon</span></span>
-      </a>
-      <a class="btn" href="https://github.com/ashishkattamuri/claude-companion/releases/latest/download/Companion-for-Claude-x64.dmg">
-        <span>Download for Mac<span class="sub">Intel</span></span>
-      </a>
-      <a class="btn" href="https://github.com/ashishkattamuri/claude-companion">
-        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.6 22.4c.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.9 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.2c0 .3.2.7.8.6A11.5 11.5 0 0 0 12 .5z"/></svg>
-        <span>View on GitHub</span>
-      </a>
+      <a class="btn primary" href="https://github.com/ashishkattamuri/claude-companion/releases/latest/download/Companion-for-Claude-arm64.dmg"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.6c0-2.4 2-3.6 2.1-3.7-1.1-1.7-2.9-1.9-3.5-1.9-1.5-.2-2.9.9-3.7.9-.8 0-1.9-.9-3.2-.8-1.6 0-3.1 1-4 2.4-1.7 3-.4 7.4 1.2 9.8.8 1.2 1.8 2.5 3 2.4 1.2 0 1.7-.8 3.1-.8 1.5 0 1.9.8 3.2.8 1.3 0 2.2-1.2 3-2.4.9-1.4 1.3-2.7 1.3-2.8-.1 0-2.5-.9-2.5-3.9zM14 5.5c.7-.8 1.1-1.9 1-3-1 0-2.1.7-2.8 1.5-.6.7-1.2 1.8-1 2.9 1 .1 2.1-.6 2.8-1.4z"/></svg><span>Download for Mac<span class="sub">Apple silicon</span></span></a>
+      <a class="btn" href="https://github.com/ashishkattamuri/claude-companion/releases/latest/download/Companion-for-Claude-x64.dmg"><span>Download for Mac<span class="sub">Intel</span></span></a>
+      <a class="btn" href="https://github.com/ashishkattamuri/claude-companion"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.6 22.4c.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.9 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.2c0 .3.2.7.8.6A11.5 11.5 0 0 0 12 .5z"/></svg><span>View on GitHub</span></a>
     </div>
-    <div class="meta"><span id="version">Latest release</span> · macOS 13 or later · uses your own <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a> login</div>
+    <div class="meta">Works with Claude Code · Free and open source · Nothing leaves your Mac</div>
 
     <div class="window">
       <div class="bar"><i></i><i></i><i></i><span>Companion for Claude</span></div>
-      <video data-src="assets/hero-branching.mp4" poster="assets/hero-branching.jpg" muted loop playsinline preload="none" aria-label="Asking Claude to open a separate chat for a workstream opens a new linked session"></video>
+      <video data-src="assets/hero-branching.mp4" poster="assets/hero-branching.jpg" muted loop playsinline preload="none" aria-label="Asking for a separate chat opens a new linked session that already knows the plan"></video>
     </div>
-    <p class="caption">Real recording. “Open a separate chat for the caching workstream” opens a linked session that already knows the plan.</p>
+    <p class="caption">“Open a separate chat for the caching workstream.” A new session starts, already knowing the plan.</p>
   </div>
 </header>
 
-<section class="problem">
+<section class="problem" id="problem">
   <div class="wrap">
-    <div class="label">Why</div>
-    <h2>Long sessions get slower, pricier and <em>less accurate</em> as their context fills up.</h2>
-    <p>One chat rarely stays one topic. Forty messages later the plan you made is buried under detours, every turn pays for all of it again, and when the session ends its decisions sit in a transcript nobody reads. Companion treats context as something you manage: see it, keep it focused, split it when the work splits, and carry what matters into the next session.</p>
+    <div class="label">The problem</div>
+    <h2>Every long session <em>ends the same way.</em></h2>
+    <div class="symptoms">
+      <div class="symptom"><q>Wait, we already decided that.</q><p>After a compaction, the reasons behind your decisions are gone, and the agent starts arguing them again.</p></div>
+      <div class="symptom"><q>Why did that turn cost so much?</q><p>Every message re-reads the whole history. A model switch or a long pause makes the agent reprocess all of it.</p></div>
+      <div class="symptom"><q>Let me explain the project again.</q><p>A new chat starts from zero. So you either drag the old one along, or you repeat yourself.</p></div>
+    </div>
+    <p class="footnote">It's not just you: models get measurably less reliable as their input grows. <a href="https://www.trychroma.com/research/context-rot">Chroma, “Context Rot”</a></p>
   </div>
 </section>
 
-<section class="alt" id="features">
+<section class="alt how" id="how">
   <div class="wrap">
-    <div class="chapter-head">
-      <span class="chip">01 SEE</span>
-      <h2>Know what each session <em>is carrying.</em></h2>
-    </div>
-
+    <div class="label">How Companion fixes it</div>
+    <h2 class="section-title" style="font-size: clamp(34px, 4.4vw, 54px); line-height: 1.05; margin: 12px 0 24px;">Treat context as something <em>you manage.</em></h2>
     <div class="features">
       <div class="feature">
         <div class="text">
-          <div class="label">Context window</div>
-          <h3>See what fills the context</h3>
-          <p>A meter sized to the model's real limit, broken down from Claude Code's own <code>/context</code>: system prompt, tools, MCP tools, skills, messages and the autocompact buffer.</p>
-          <p>Compact with a focus, and pin the files the work depends on so they survive compacting.</p>
+          <div class="num">01</div>
+          <h3 class="big">See it <em>before it hurts.</em></h3>
+          <p>Know what fills a session, what the next turn will cost and where tokens are going to waste, before the quality slips. Companion warns you before an action makes your running chats reprocess everything.</p>
+          <div class="tags">Context breakdown · Cache warnings · Audits</div>
         </div>
         <div class="clip"><video data-src="assets/clips/05-context-window.mp4" poster="assets/clips/05-context-window.jpg" muted loop playsinline preload="none"></video></div>
       </div>
       <div class="feature">
         <div class="text">
-          <div class="label">Prompt cache</div>
-          <h3>Know when a turn reprocesses everything</h3>
-          <p>See how long the cache stays warm, what a cold resume costs, and why a turn missed it: a model switch, expiry, compaction or a tools change. Companion warns before an action would break the cache for running chats.</p>
-        </div>
-        <div class="clip"><video data-src="assets/clips/17-cache-misses.mp4" poster="assets/clips/17-cache-misses.jpg" muted loop playsinline preload="none"></video></div>
-      </div>
-      <div class="feature">
-        <div class="text">
-          <div class="label">Audit</div>
-          <h3>Find where the tokens went</h3>
-          <p>Files read again and again, approaches retried after they failed, full test suites run when one test would do. Each finding comes with its cost, its likely cause in your setup and a fix, confirmed by a second model.</p>
-        </div>
-        <div class="clip"><video data-src="assets/clips/06-audit.mp4" poster="assets/clips/06-audit.jpg" muted loop playsinline preload="none"></video></div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section>
-  <div class="wrap">
-    <div class="chapter-head">
-      <span class="chip">02 STEER</span>
-      <h2>Split the context when <em>the work splits.</em></h2>
-    </div>
-
-    <div class="features">
-      <div class="feature">
-        <div class="text">
-          <div class="label">Sub-sessions</div>
-          <h3>Branch into linked chats</h3>
-          <ul>
-            <li>Say “open a separate chat for…” and a new session starts on it right away.</li>
-            <li>It knows the parent's notes and recent exchanges as background, so its own thread stays clean.</li>
-            <li>It can look up any detail from the earlier chat, word for word.</li>
-            <li>The parent becomes a decision log of every chat opened from it.</li>
-          </ul>
+          <div class="num">02</div>
+          <h3 class="big">Split the work, <em>keep the memory.</em></h3>
+          <p>When the conversation forks, branch it. The new chat starts with the plan as background, keeps its own thread clean, and can look up anything from the original word for word. Side questions get answered on the side, without growing the chat.</p>
+          <div class="tags">Linked sub-sessions · Side chats</div>
         </div>
         <div class="clip"><video data-src="assets/clips/07-sub-sessions.mp4" poster="assets/clips/07-sub-sessions.jpg" muted loop playsinline preload="none"></video></div>
       </div>
       <div class="feature">
         <div class="text">
-          <div class="label">Side chats</div>
-          <h3>Ask on the side</h3>
-          <p>Ask about any message in a thread beside the chat. Claude answers with the whole conversation in mind, but nothing you ask is added to it, so the chat doesn't grow. Answers come from a fork that reads from the prompt cache, and show their cost.</p>
-        </div>
-        <div class="clip"><video data-src="assets/clips/09-side-chats.mp4" poster="assets/clips/09-side-chats.jpg" muted loop playsinline preload="none"></video></div>
-      </div>
-      <div class="feature">
-        <div class="text">
-          <div class="label">Notes &amp; hand-off</div>
-          <h3>Carry decisions forward, not transcripts</h3>
-          <p>After each turn Companion keeps a Markdown notes file: the goal, decisions with their reasons, paths, commands, errors and fixes. When a session runs long, <strong>Hand off</strong> opens a fresh one from the notes and pinned files.</p>
+          <div class="num">03</div>
+          <h3 class="big">Pick up <em>exactly where you left off.</em></h3>
+          <p>Every session keeps living notes: the goal, each decision and why, the commands that worked. Hand off to a fresh session without re-explaining, and start the morning from a recap instead of a transcript.</p>
+          <div class="tags">Session notes · Hand-off · Morning recap</div>
         </div>
         <div class="clip"><video data-src="assets/clips/10-notes-and-handoff.mp4" poster="assets/clips/10-notes-and-handoff.jpg" muted loop playsinline preload="none"></video></div>
       </div>
@@ -320,35 +304,30 @@
   </div>
 </section>
 
+<section>
+  <div class="wrap">
+    <div class="label">Hour three of a session</div>
+    <h2 style="font-size: clamp(32px, 4vw, 48px); line-height: 1.1; margin-top: 12px;">The same work, <em>without the drift.</em></h2>
+    <div class="compare">
+      <div class="row"><div></div><div>The agent alone</div><div>With Companion</div></div>
+      <div class="row"><div class="k">The context window</div><div class="before">Fills up out of sight</div><div class="after">A meter shows what's in it and warns early</div></div>
+      <div class="row"><div class="k">Your decisions</div><div class="before">Lost at the next compaction</div><div class="after">Written to notes, with the reasons</div></div>
+      <div class="row"><div class="k">A quick side question</div><div class="before">Added to the chat, paid for on every later turn</div><div class="after">Answered on the side, adds nothing</div></div>
+      <div class="row"><div class="k">A new topic comes up</div><div class="before">Same chat, or start over</div><div class="after">A linked chat that already knows the plan</div></div>
+      <div class="row"><div class="k">What the agent changed</div><div class="before">Scattered across the transcript</div><div class="after">One review, like a pull request</div></div>
+      <div class="row"><div class="k">Tomorrow morning</div><div class="before">Scroll back and reread</div><div class="after">A recap, and one click to continue</div></div>
+    </div>
+  </div>
+</section>
+
 <section class="alt">
   <div class="wrap">
-    <div class="chapter-head">
-      <span class="chip">03 TRUST</span>
-      <h2>Every session in one window, <em>every change reviewed.</em></h2>
-    </div>
-
     <div class="features">
       <div class="feature">
         <div class="text">
-          <div class="label">Sessions</div>
-          <h3>Grouped by what they need from you</h3>
-          <p>Live and recent sessions from all your projects: <em>Needs you</em>, <em>Running</em> and <em>Earlier</em>. A session stuck on a question moves to the top, and permission prompts can be answered right in the conversation.</p>
-        </div>
-        <div class="clip"><video data-src="assets/clips/01-session-groups.mp4" poster="assets/clips/01-session-groups.jpg" muted loop playsinline preload="none"></video></div>
-      </div>
-      <div class="feature">
-        <div class="text">
-          <div class="label">Review</div>
-          <h3>Review a session like a pull request</h3>
-          <p>One net diff per file, a short explanation of why it changed, and Claude's own words beside each edit with a link to that moment in the chat. Built from the session's record, not git, so it shows exactly what the AI changed.</p>
-        </div>
-        <div class="clip"><video data-src="assets/clips/13-review.mp4" poster="assets/clips/13-review.jpg" muted loop playsinline preload="none"></video></div>
-      </div>
-      <div class="feature">
-        <div class="text">
-          <div class="label">Terminal sync</div>
-          <h3>Drive a session from anywhere</h3>
-          <p>Sessions run as Claude Code background sessions. Type in Companion, its terminal pane, or any terminal attached with <code>claude attach</code>: it's one live session, and every place shows the same thing.</p>
+          <div class="label">Fits how you already work</div>
+          <h3 class="big">Built around your agent, <em>not instead of it.</em></h3>
+          <p>Companion works with Claude Code. Your sessions stay real Claude Code sessions, on your own login, with your plugins, MCP servers and settings. Drive them from Companion or from any terminal with <code>claude attach</code>: it's one live session, and every place shows the same thing.</p>
         </div>
         <div class="clip"><video data-src="assets/clips/11-terminal-sync.mp4" poster="assets/clips/11-terminal-sync.jpg" muted loop playsinline preload="none"></video></div>
       </div>
@@ -356,28 +335,10 @@
   </div>
 </section>
 
-<section class="more">
-  <div class="wrap">
-    <div class="label">And more</div>
-    <h2>Built for <em>real, long-running</em> work.</h2>
-    <div class="grid">
-      <div class="tile"><h3>Search everything</h3><p>Full-text search across everything you and Claude wrote, in every project.</p></div>
-      <div class="tile"><h3>Every step, not just the answer</h3><p>Each tool call as a step you can expand to the exact diff or command output.</p></div>
-      <div class="tile"><h3>Morning recap</h3><p>Yesterday's work by project, with blockers and action items, and a jump back into the session.</p></div>
-      <div class="tile"><h3>New sessions with guardrails</h3><p>Pick the model, plan first, ask before edits, and work in its own git worktree.</p></div>
-      <div class="tile"><h3>Compaction history</h3><p>Where each compaction happened, its before and after size, and the summary Claude works from.</p></div>
-      <div class="tile"><h3>Heaviest in context</h3><p>The biggest tool results Claude still carries, with a jump to each and “Compact without these”.</p></div>
-      <div class="tile"><h3>Connectors</h3><p>Browse and manage Claude Code's plugins, marketplaces and MCP servers in one place.</p></div>
-      <div class="tile"><h3>Branch from any terminal</h3><p>Register the branching tool once and every Claude Code session can open a linked chat.</p></div>
-      <div class="tile"><h3>A CLI too</h3><p><code>companion recap</code>, <code>companion audit &lt;id&gt;</code> and <code>companion doctor</code> from your terminal.</p></div>
-    </div>
-  </div>
-</section>
-
-<section class="demo alt">
+<section class="demo">
   <div class="wrap">
     <div class="label">Demo · 4:40</div>
-    <h2>Watch it run <em>real sessions.</em></h2>
+    <h2>Watch it on <em>real sessions.</em></h2>
     <a class="cover" href="https://www.youtube.com/watch?v=Em9um7jZJz0" aria-label="Watch the demo on YouTube">
       <img src="media/demo-cover.jpg" alt="Companion for Claude demo video" width="1280" height="720">
       <span class="play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4l15 8-15 8z"/></svg></span>
@@ -385,7 +346,7 @@
   </div>
 </section>
 
-<section class="install" id="install">
+<section class="install alt" id="install">
   <div class="wrap">
     <div class="label">Install</div>
     <h2>Up and running in <em>a minute.</em></h2>
@@ -406,37 +367,20 @@
         <h3>Optional: the <code>companion</code> command</h3>
         <p>The CLI ships inside the app. Link it onto your PATH:</p>
         <pre>sudo ln -sf "/Applications/Companion for Claude.app/Contents/Resources/bin/companion" /usr/local/bin/companion
-<span class="c"># let every Claude session branch</span>
+<span class="c"># let every session branch</span>
 companion tools install</pre>
       </div>
     </div>
-    <div class="note"><strong>Prefer to build it yourself?</strong> Clone the repo, then <code>npm install &amp;&amp; npm run build &amp;&amp; npm link</code>, or <code>npm run dist:mac</code> to make the .dmg. See the <a href="https://github.com/ashishkattamuri/claude-companion#install">README</a>.</div>
-  </div>
-</section>
-
-<section class="privacy alt">
-  <div class="wrap cols">
-    <div>
-      <div class="label">Privacy</div>
-      <h2>Everything stays <em>on your machine.</em></h2>
-      <p>Companion reads Claude Code's transcripts into a local SQLite database. Summaries, notes, reviews and audits run through <code>claude -p</code> on your own login, isolated and capped per run.</p>
-    </div>
-    <ul class="checks">
-      <li>No account, no server, no telemetry</li>
-      <li>Model calls run with no tools, hooks or MCP servers, and aren't saved as sessions</li>
-      <li>Opt whole projects out with a glob in a config file</li>
-      <li><code>companion doctor</code> shows how many model calls were made</li>
-      <li>MIT licensed: read every line</li>
-    </ul>
+    <div class="note"><strong>Everything stays on your Mac.</strong> No account, no server, no telemetry. Notes and summaries run through <code>claude -p</code> on your own login. MIT licensed. Prefer to build it yourself? See the <a href="https://github.com/ashishkattamuri/claude-companion#install">README</a>.</div>
   </div>
 </section>
 
 <section class="final">
   <div class="wrap">
-    <h2>Give your sessions <em>room to think.</em></h2>
+    <h2>Make the sixth hour <em>as sharp as the first.</em></h2>
     <div class="cta">
-      <a class="btn primary" href="#install">Download for Mac</a>
-      <a class="btn" href="https://github.com/ashishkattamuri/claude-companion">Star on GitHub</a>
+      <a class="btn primary" href="https://github.com/ashishkattamuri/claude-companion/releases/latest/download/Companion-for-Claude-arm64.dmg"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.6c0-2.4 2-3.6 2.1-3.7-1.1-1.7-2.9-1.9-3.5-1.9-1.5-.2-2.9.9-3.7.9-.8 0-1.9-.9-3.2-.8-1.6 0-3.1 1-4 2.4-1.7 3-.4 7.4 1.2 9.8.8 1.2 1.8 2.5 3 2.4 1.2 0 1.7-.8 3.1-.8 1.5 0 1.9.8 3.2.8 1.3 0 2.2-1.2 3-2.4.9-1.4 1.3-2.7 1.3-2.8-.1 0-2.5-.9-2.5-3.9zM14 5.5c.7-.8 1.1-1.9 1-3-1 0-2.1.7-2.8 1.5-.6.7-1.2 1.8-1 2.9 1 .1 2.1-.6 2.8-1.4z"/></svg><span>Download for Mac</span></a>
+      <a class="btn" href="https://github.com/ashishkattamuri/claude-companion"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.6 22.4c.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.9 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.2c0 .3.2.7.8.6A11.5 11.5 0 0 0 12 .5z"/></svg><span>Star on GitHub</span></a>
     </div>
   </div>
 </section>
@@ -470,10 +414,6 @@ companion tools install</pre>
   const nav = document.getElementById('nav');
   addEventListener('scroll', () => nav.classList.toggle('scrolled', scrollY > 8), { passive: true });
 
-  fetch('https://api.github.com/repos/ashishkattamuri/claude-companion/releases/latest')
-    .then((r) => (r.ok ? r.json() : null))
-    .then((r) => { if (r && r.tag_name) document.getElementById('version').textContent = r.tag_name; })
-    .catch(() => {});
 </script>
 </body>
 </html>
