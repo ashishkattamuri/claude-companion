@@ -43,4 +43,7 @@ mac:
 
 dmg:
   title: Companion for Claude ${version}
+  # Signed too, so the downloaded file itself passes Gatekeeper; the release workflow notarizes
+  # and staples it after packaging.
+  sign: true
   artifactName: Companion-for-Claude-${arch}.${ext}

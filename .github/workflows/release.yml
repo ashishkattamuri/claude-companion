@@ -66,6 +66,18 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
 
+      - name: Notarize the disk images
+        if: env.BUILDER_CONFIG == 'electron-builder.yml'
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          for dmg in release/Companion-for-Claude-arm64.dmg release/Companion-for-Claude-x64.dmg; do
+            xcrun notarytool submit "$dmg" --key "$APPLE_API_KEY" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait
+            xcrun stapler staple "$dmg"
+            spctl -a -t open --context context:primary-signature -vv "$dmg"
+          done
+
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/')
         env:

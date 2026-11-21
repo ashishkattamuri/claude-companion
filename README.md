@@ -75,11 +75,7 @@ Requires macOS 13 or later and [Claude Code](https://docs.anthropic.com/en/docs/
 
 1. Download the app from the [latest release](https://github.com/ashishkattamuri/claude-companion/releases/latest): [Apple silicon](https://github.com/ashishkattamuri/claude-companion/releases/latest/download/Companion-for-Claude-arm64.dmg) or [Intel](https://github.com/ashishkattamuri/claude-companion/releases/latest/download/Companion-for-Claude-x64.dmg).
 2. Open the `.dmg` and drag **Companion for Claude** to Applications.
-3. Open it. The app isn't notarized by Apple yet, so the first time macOS blocks it: go to **System Settings → Privacy & Security** and click **Open Anyway**. Or clear the download flag in a terminal:
-
-   ```sh
-   xattr -dr com.apple.quarantine "/Applications/Companion for Claude.app"
-   ```
+3. Open it. The app is signed with a Developer ID and notarized by Apple, so macOS opens it like any downloaded app.
 
 The `companion` command ships inside the app and runs on the app's own Node. To put it on your PATH:
 
