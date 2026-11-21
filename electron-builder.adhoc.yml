@@ -1,0 +1,6 @@
+# Local and unsigned builds: an ad-hoc signature instead of a Developer ID, and no notarization.
+# macOS asks before the first launch of a downloaded copy (see README).
+extends: electron-builder.yml
+mac:
+  identity: '-'
+  notarize: false

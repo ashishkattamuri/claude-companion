@@ -31,9 +31,13 @@ mac:
     - dmg
     - zip
   # Version-free file names, so releases/latest/download/<name> always points at the newest build.
-  # Ad-hoc signature: not notarized, so the first launch needs Open Anyway (see README).
-  identity: '-'
-  hardenedRuntime: false
+  # Signed with the Developer ID certificate in CSC_LINK and notarized with the App Store Connect
+  # key in APPLE_API_KEY / APPLE_API_KEY_ID / APPLE_API_ISSUER. Without them, build with
+  # electron-builder.adhoc.yml.
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: true
   gatekeeperAssess: false
   artifactName: Companion-for-Claude-${arch}-mac.${ext}
 

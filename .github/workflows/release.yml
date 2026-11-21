@@ -2,6 +2,13 @@ name: Release
 
 # Push a tag like v0.1.0 to build the macOS app for Apple silicon and Intel, check the
 # Apple silicon build with the offline e2e suite, and publish both to a GitHub release.
+#
+# Signing and notarization use these repository secrets; without them the build is ad-hoc signed:
+#   MAC_CERT_P12_BASE64     Developer ID Application certificate (.p12), base64-encoded
+#   MAC_CERT_PASSWORD       its export password
+#   APPLE_API_KEY_P8        App Store Connect API key (.p8 file contents)
+#   APPLE_API_KEY_ID        its key ID
+#   APPLE_API_ISSUER        its issuer ID
 on:
   push:
     tags: ['v*']
@@ -24,14 +31,40 @@ jobs:
       - run: npm test
       - run: npm run build
 
+      - name: Signing setup
+        env:
+          MAC_CERT_P12_BASE64: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          if [ -n "$MAC_CERT_P12_BASE64" ]; then
+            mkdir -p "$RUNNER_TEMP/keys"
+            printf '%s' "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/keys/AuthKey.p8"
+            echo "BUILDER_CONFIG=electron-builder.yml" >> "$GITHUB_ENV"
+            echo "APPLE_API_KEY=$RUNNER_TEMP/keys/AuthKey.p8" >> "$GITHUB_ENV"
+            echo "Signing with Developer ID and notarizing."
+          else
+            echo "BUILDER_CONFIG=electron-builder.adhoc.yml" >> "$GITHUB_ENV"
+            echo "::warning::No signing secrets: building ad-hoc signed and not notarized."
+          fi
+
       - name: Package (Apple silicon)
-        run: npx electron-builder --mac --arm64 --publish never
+        run: npx electron-builder --mac --arm64 --config "$BUILDER_CONFIG" --publish never
+        env:
+          CSC_LINK: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
       - name: End-to-end check of the packaged app
         run: node test/e2e/run.mjs
         env:
           COMPANION_E2E_APP: release/mac-arm64/Companion for Claude.app
       - name: Package (Intel)
-        run: npx electron-builder --mac --x64 --publish never
+        run: npx electron-builder --mac --x64 --config "$BUILDER_CONFIG" --publish never
+        env:
+          CSC_LINK: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/')

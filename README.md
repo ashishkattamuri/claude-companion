@@ -1,6 +1,6 @@
 # Companion for Claude
 
-**Long agent sessions, without the rot.**
+**Keep your agent sharp.**
 
 **[Download for macOS](https://github.com/ashishkattamuri/claude-companion/releases/latest)** · [Website](https://ashishkattamuri.github.io/claude-companion/) · [Demo video](https://www.youtube.com/watch?v=Em9um7jZJz0)
 
@@ -150,7 +150,7 @@ npm run dist:mac          # build and package the app into release/ (.dmg and .z
 COMPANION_E2E_APP="release/mac-arm64/Companion for Claude.app" npm run test:e2e   # the e2e suite against the packaged app
 ```
 
-Pushing a version tag (`git tag v0.1.0 && git push origin v0.1.0`) runs the [Release workflow](.github/workflows/release.yml): it packages the app for Apple silicon and Intel, runs the e2e suite against the packaged app and publishes a GitHub release. File names carry no version, so `releases/latest/download/Companion-for-Claude-arm64.dmg` always points at the newest build. The app is ad-hoc signed, not notarized.
+Pushing a version tag (`git tag v0.1.0 && git push origin v0.1.0`) runs the [Release workflow](.github/workflows/release.yml): it packages the app for Apple silicon and Intel, runs the e2e suite against the packaged app and publishes a GitHub release. File names carry no version, so `releases/latest/download/Companion-for-Claude-arm64.dmg` always points at the newest build. With the signing secrets set (listed at the top of the workflow: a Developer ID Application certificate and an App Store Connect API key), releases are signed and notarized, so macOS opens them without a warning. Without them the build is ad-hoc signed, as is `npm run dist:mac` (`electron-builder.adhoc.yml`).
 
 The website is [`docs/index.html`](docs/index.html), served by GitHub Pages from the `docs/` folder on `main`.
 

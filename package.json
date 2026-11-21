@@ -19,7 +19,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build && tsup src/cli.ts --format esm --target node22 --clean",
-    "dist:mac": "npm run build && electron-builder --mac --publish never && electron-rebuild -f -w better-sqlite3,node-pty",
+    "dist:mac": "npm run build && electron-builder --mac --config electron-builder.adhoc.yml --publish never && electron-rebuild -f -w better-sqlite3,node-pty",
     "app": "electron .",
     "typecheck": "tsc --noEmit && tsc --noEmit -p src/renderer",
     "test": "ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs run",
