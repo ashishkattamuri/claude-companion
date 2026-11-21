@@ -103,6 +103,10 @@ try {
   const thread = () => page.locator('.thread').innerText();
   const status = () => page.locator('.status-pill').innerText();
 
+  if (packaged) {
+    // Its own app-data folder, so a dev copy that's running can't hold its single-instance lock.
+    check('the packaged app is named Companion for Claude', (await app.evaluate(({ app }) => app.getName())) === 'Companion for Claude');
+  }
   check('opens on Today', await until(async () => /Good (morning|afternoon|evening)/.test(await page.locator('h1').innerText())));
   check('lists the earlier session', await until(async () => (await page.locator('.sessions').innerText()).includes('Webhook retry logic')));
   await page.screenshot({ path: join(shots, '1-today.png') });

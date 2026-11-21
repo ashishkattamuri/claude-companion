@@ -20,6 +20,12 @@ files:
 # modules (better-sqlite3, node-pty) load from plain files.
 asar: false
 
+# The installed app's name, and so its app-data folder (~/Library/Application Support/Companion for
+# Claude). Without it Electron falls back to the package name, the folder a dev copy (`npm run app`)
+# uses, and the installed app quits on the dev copy's single-instance lock.
+extraMetadata:
+  productName: Companion for Claude
+
 extraResources:
   - from: build/companion
     to: bin/companion
