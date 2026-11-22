@@ -24,8 +24,6 @@ const MODES: Record<NonNullable<NewSessionRequest['permissionMode']>, string> = 
   plan: 'Plan first',
 };
 const MODELS: Record<string, string> = { '': 'Your default model', opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku' };
-/** The project list's last entry, which opens a folder picker instead of selecting. */
-const CHOOSE = '__choose_folder__';
 const SETTINGS_KEY = 'companion.newSession.settingsOpen';
 
 function readSettingsOpen(): boolean {
@@ -113,25 +111,29 @@ export function NewSessionPage({ initial, sessions, onStart, onCancel, onOpen }:
             className="ns-pill"
             value={cwd}
             title={shortPath(cwd)}
-            onChange={async (e) => {
-              if (e.target.value !== CHOOSE) return setCwd(e.target.value);
-              const picked = await api.pickFolder();
-              if (picked) setCwd(picked);
-            }}
+            onChange={(e) => setCwd(e.target.value)}
           >
             {options.map((p) => (
               <option key={p.cwd} value={p.cwd}>
                 {p.name}
               </option>
             ))}
-            <option disabled>──────────</option>
-            <option value={CHOOSE}>Choose folder…</option>
           </select>
           {branch && (
             <span className="ns-branch mono" title="Git branch of the latest session here">
               <BranchIcon /> {branch}
             </span>
           )}
+          <button
+            type="button"
+            className="btn quiet small ns-choose"
+            onClick={async () => {
+              const picked = await api.pickFolder();
+              if (picked) setCwd(picked);
+            }}
+          >
+            Choose folder…
+          </button>
         </div>
 
         <form
