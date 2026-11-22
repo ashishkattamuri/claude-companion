@@ -1,14 +1,11 @@
 import { useEffect, useState, type MouseEvent } from 'react';
 import type { SessionListItem } from '../../shared/api';
-import { shortPath, timeAgo } from './format';
+import { isStale, shortPath, timeAgo } from './format';
 
-export type Page = 'today' | 'ideas' | 'goals' | 'feed' | 'connectors';
+export type Page = 'today' | 'connectors';
 
 const PAGES: { id: Page; label: string; icon: string }[] = [
   { id: 'today', label: 'Today', icon: 'M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zM8 5v3l2 1.5' },
-  { id: 'ideas', label: 'Ideas', icon: 'M8 2.5a4 4 0 0 0-2.3 7.3V12h4.6V9.8A4 4 0 0 0 8 2.5zM6.5 14h3' },
-  { id: 'goals', label: 'Goals', icon: 'M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zM8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z' },
-  { id: 'feed', label: 'Feed', icon: 'M3 4h10M3 8h10M3 12h6' },
   { id: 'connectors', label: 'Connectors', icon: 'M6 3v3M10 3v3M4.5 6h7v2.5a3.5 3.5 0 0 1-7 0zM8 12v2' },
 ];
 
@@ -35,6 +32,7 @@ type Menu = { ids: string[]; x: number; y: number };
 
 const FOLDER_KEY = 'sidebar.folder';
 
+
 export function Sidebar({ page, sessions: all, selectedId, search, onSearch, onPage, onSelect, onNew, newActive, onHide, onDelete, onAudit }: Props) {
   const [showHidden, setShowHidden] = useState(false);
   /** Only this folder's chats; empty for all folders. Kept across restarts. */
@@ -49,13 +47,16 @@ export function Sidebar({ page, sessions: all, selectedId, search, onSearch, onP
   const hiddenCount = scoped.filter((s) => s.hidden).length;
   const sessions = showHidden ? scoped : scoped.filter((s) => !s.hidden);
   const needs = sessions.filter((s) => s.status === 'waiting');
-  const running = sessions.filter((s) => s.status !== 'waiting' && (s.attached || s.live));
+  const live = sessions.filter((s) => s.status !== 'waiting' && (s.attached || s.live));
+  const running = live.filter((s) => !isStale(s) || s.id === selectedId);
+  const elsewhere = live.filter((s) => !running.includes(s));
   const earlier = sessions.filter((s) => s.status !== 'waiting' && !s.attached && !s.live).slice(0, 80);
-  const groups: { label: string; count?: number; rows: Row[] }[] = search
+  const groups: { label: string; count?: number; rows: Row[]; collapsible?: boolean }[] = search
     ? [{ label: 'Matches', count: sessions.length, rows: nest(sessions) }]
     : [
         ...(needs.length ? [{ label: 'Needs you', count: needs.length, rows: nest(needs) }] : []),
         ...(running.length ? [{ label: 'Running', count: running.length, rows: nest(running) }] : []),
+        ...(elsewhere.length ? [{ label: 'Running elsewhere', count: elsewhere.length, rows: nest(elsewhere), collapsible: true }] : []),
         { label: 'Earlier', rows: nest(earlier) },
       ];
   const order = groups.flatMap((g) => g.rows.map((r) => r.s.id));
@@ -186,7 +187,7 @@ export function Sidebar({ page, sessions: all, selectedId, search, onSearch, onP
       ) : (
         <div className="sidebar-foot">
           <span>
-            {running.length + needs.length} live{needs.length ? ` · ${needs.length} need${needs.length > 1 ? '' : 's'} you` : ''}
+            {live.length + needs.length} live{needs.length ? ` · ${needs.length} need${needs.length > 1 ? '' : 's'} you` : ''}
           </span>
           {hiddenCount > 0 && (
             <button className="link-btn" onClick={() => setShowHidden((v) => !v)}>
@@ -245,6 +246,7 @@ function Group({
   label,
   count,
   rows,
+  collapsible,
   selectedId,
   picked,
   onClick,
@@ -253,19 +255,34 @@ function Group({
   label: string;
   count?: number;
   rows: Row[];
+  collapsible?: boolean;
   selectedId: string | null;
   picked: string[];
   onClick: (e: MouseEvent, id: string) => void;
   onMenu: (id: string, x: number, y: number) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const shown = collapsible && !open ? [] : rows;
   return (
     <>
-      <div className="group">
-        <span>{label}</span>
-        {count !== undefined && <span>{count}</span>}
-      </div>
+      {collapsible ? (
+        <button className="group group-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+          <span>
+            <span className="group-caret" aria-hidden="true">
+              {open ? '▾' : '▸'}
+            </span>{' '}
+            {label}
+          </span>
+          {count !== undefined && <span>{count}</span>}
+        </button>
+      ) : (
+        <div className="group">
+          <span>{label}</span>
+          {count !== undefined && <span>{count}</span>}
+        </div>
+      )}
       {rows.length === 0 && <div className="muted small group-empty">Nothing here.</div>}
-      {rows.map(({ s, depth }) => (
+      {shown.map(({ s, depth }) => (
         <div key={s.id} className="s-row-wrap">
           <button
             className={`s-row ${selectedId === s.id ? 'selected' : ''} ${picked.includes(s.id) ? 'picked' : ''} ${depth ? 'child' : ''} ${s.hidden ? 'hidden-row' : ''}`}
@@ -284,7 +301,14 @@ function Group({
             <span className="s-time">{s.status === 'busy' ? 'now' : timeAgo(s.lastTs, Date.now(), true)}</span>
             <span className="s-meta">
               <span className="proj">{s.project ?? '?'}</span>
-              {s.live && !s.background && <span className="where" title="A plain claude in another terminal: view only">other terminal</span>}
+              {s.live && !s.background && (
+                <span className="where-icon" title="In another terminal: view only" aria-label="In another terminal">
+                  <svg viewBox="0 0 16 16" aria-hidden="true">
+                    <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
+                    <path d="M4.5 6l2 2-2 2M8 10h3.5" />
+                  </svg>
+                </span>
+              )}
               {s.status === 'waiting' && <span className="needs-label">needs you</span>}
               {s.transcriptGone && <span className="where">archived</span>}
               {s.hidden && <span className="where">hidden</span>}

@@ -18,6 +18,8 @@ const MODES: Record<NonNullable<NewSessionRequest['permissionMode']>, string> = 
   plan: 'Plan first',
 };
 const MODELS: Record<string, string> = { '': 'Your default model', opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku' };
+/** The project list's last entry, which opens a folder picker instead of selecting. */
+const CHOOSE = '__choose_folder__';
 const SETTINGS_KEY = 'companion.newSession.settingsOpen';
 
 function readSettingsOpen(): boolean {
@@ -87,13 +89,7 @@ export function NewSessionPage({ initial, sessions, onStart, onCancel }: Props) 
 
   return (
     <div className="page ns-page">
-      <header className="page-header ns-crumbs">
-        <button type="button" className="crumb-link" onClick={onCancel}>
-          Sessions
-        </button>
-        <span className="ns-crumb-sep">/</span>
-        <span className="ns-crumb-here">New session</span>
-      </header>
+      <div className="ns-drag" />
 
       <div className="ns-body">
         <h1 className="ns-title">New session</h1>
@@ -102,28 +98,30 @@ export function NewSessionPage({ initial, sessions, onStart, onCancel }: Props) 
           <label htmlFor="ns-project" className="ns-label">
             Project
           </label>
-          <select id="ns-project" className="ns-pill" value={cwd} onChange={(e) => setCwd(e.target.value)}>
+          <select
+            id="ns-project"
+            className="ns-pill"
+            value={cwd}
+            title={shortPath(cwd)}
+            onChange={async (e) => {
+              if (e.target.value !== CHOOSE) return setCwd(e.target.value);
+              const picked = await api.pickFolder();
+              if (picked) setCwd(picked);
+            }}
+          >
             {options.map((p) => (
               <option key={p.cwd} value={p.cwd}>
                 {p.name}
               </option>
             ))}
+            <option disabled>──────────</option>
+            <option value={CHOOSE}>Choose folder…</option>
           </select>
           {branch && (
             <span className="ns-branch mono" title="Git branch of the latest session here">
               <BranchIcon /> {branch}
             </span>
           )}
-          <button
-            type="button"
-            className="btn quiet small ns-choose"
-            onClick={async () => {
-              const picked = await api.pickFolder();
-              if (picked) setCwd(picked);
-            }}
-          >
-            Choose folder…
-          </button>
         </div>
 
         <form

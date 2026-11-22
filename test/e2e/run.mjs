@@ -108,6 +108,8 @@ try {
     check('the packaged app is named Companion for Claude', (await app.evaluate(({ app }) => app.getName())) === 'Companion for Claude');
   }
   check('opens on New session', await until(async () => (await page.locator('.ns-page .ns-title').count()) === 1));
+  check('the sidebar shows only pages that exist', (await page.locator('.nav button').allInnerTexts()).map((t) => t.trim()).join(',') === 'Today,Connectors');
+  check('Choose folder… is in the project list', (await page.locator('#ns-project option', { hasText: 'Choose folder…' }).count()) === 1);
   check('lists the earlier session', await until(async () => (await page.locator('.sessions').innerText()).includes('Webhook retry logic')));
   await page.locator('.nav button', { hasText: 'Today' }).click();
   check('Today is a click away', await until(async () => /Good (morning|afternoon|evening)/.test(await page.locator('h1').innerText())));

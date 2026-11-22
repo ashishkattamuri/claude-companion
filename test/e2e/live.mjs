@@ -150,7 +150,7 @@ try {
   await until(async () => (await page.locator('.status-pill').innerText()).includes('Not running'), 15000);
 
   // 7. A session running in another terminal is shown live and read-only.
-  const other = page.locator('.s-row', { has: page.locator('.where', { hasText: 'other terminal' }) }).first();
+  const other = page.locator('.s-row', { has: page.locator('.where-icon') }).first();
   if (await other.count()) {
     await other.click();
     check('a plain session from another terminal opens view-only', await until(async () => (await page.locator('.status-pill').innerText()).includes('View only')));

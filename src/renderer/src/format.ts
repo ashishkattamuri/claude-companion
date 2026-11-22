@@ -23,3 +23,9 @@ export function greeting(now = new Date()): string {
   const h = now.getHours();
   return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
 }
+
+/** Running chats untouched this long move to the sidebar's "Running elsewhere". */
+const STALE_MS = 24 * 60 * 60 * 1000;
+/** A running chat not attached here and quiet for over a day. */
+export const isStale = (s: { attached: boolean; lastTs: string | null }, now = Date.now()) =>
+  !s.attached && !!s.lastTs && now - Date.parse(s.lastTs) > STALE_MS;

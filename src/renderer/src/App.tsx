@@ -13,12 +13,6 @@ type Selection =
   | { kind: 'session'; id: string; draft?: string; view?: View }
   | { kind: 'new'; cwd?: string; prompt?: string; back: Selection };
 
-const SOON: Record<Exclude<Page, 'today' | 'connectors'>, { title: string; text: string }> = {
-  ideas: { title: 'Ideas', text: 'Follow-ups and directions from your conversations, ready to run in one click.' },
-  goals: { title: 'Goals', text: 'Long-running goals checked on a schedule that report back only when something changes.' },
-  feed: { title: 'Feed', text: 'News related to what you are working on.' },
-};
-
 export function App() {
   const [selection, setSelection] = useState<Selection>({ kind: 'new', back: { kind: 'page', page: 'today' } });
   const [list, setList] = useState<SessionListItem[]>([]);
@@ -153,15 +147,6 @@ export function App() {
           />
         )}
         {selection.kind === 'page' && selection.page === 'connectors' && <ConnectorsPage initial={connectorsAt} onError={setToast} />}
-        {selection.kind === 'page' && selection.page !== 'today' && selection.page !== 'connectors' && (
-          <div className="page">
-            <div className="empty">
-              <h2>{SOON[selection.page].title}</h2>
-              <p className="muted">{SOON[selection.page].text}</p>
-              <span className="chip static">Coming soon</span>
-            </div>
-          </div>
-        )}
       </main>
       {toast && (
         <div className="toast" role="status" onClick={() => setToast(null)}>
