@@ -386,10 +386,10 @@ function folderOptions(items: SessionListItem[], picked: string) {
     .sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
 }
 
-const dotClass = (s: SessionListItem) =>
+export const dotClass = (s: SessionListItem) =>
   s.status === 'waiting' ? 'needs' : s.status === 'busy' ? 'working' : s.background ? 'open' : s.live ? 'external' : 'idle';
 
-const dotTitle = (s: SessionListItem) =>
+export const dotTitle = (s: SessionListItem) =>
   s.status === 'waiting'
     ? 'Waiting for you'
     : s.status === 'busy'

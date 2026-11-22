@@ -132,6 +132,7 @@ export function App() {
             sessions={list}
             onStart={(req) => void startSession(req)}
             onCancel={() => setSelection(selection.back)}
+            onOpen={(id) => setSelection({ kind: 'session', id })}
           />
         )}
         {selection.kind === 'page' && selection.page === 'today' && (

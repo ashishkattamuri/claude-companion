@@ -172,6 +172,14 @@ try {
   await page.locator('.ns-bring').click();
   await page.locator('.ns-menu button').first().click();
   check('an earlier session can be brought in as context', (await page.locator('.ns-context').count()) === 1 && (await page.locator('.ns-go').isEnabled()));
+  check("the project's sessions show as cards below the form", await until(async () => (await page.locator('.ns-card').count()) >= 3));
+  const composerBox = await page.locator('.ns-composer').boundingBox();
+  const gridBox = await page.locator('.ns-grid').boundingBox();
+  check('the grid sits below the prompt and settings', !!composerBox && !!gridBox && gridBox.y > composerBox.y + composerBox.height);
+  await page.locator('.ns-card', { hasText: 'Webhook retry logic' }).hover();
+  await page.locator('.ns-card', { hasText: 'Webhook retry logic' }).getByRole('button', { name: 'Use as context' }).click();
+  check('a card can be used as context', (await page.locator('.ns-context-title').innerText()).includes('Webhook retry logic') && (await page.locator('.ns-card.in-context').innerText()).includes('Webhook retry logic'));
+  check('using a card as context leaves the prompt where it was', (await page.locator('.ns-composer').boundingBox())?.y === composerBox?.y);
   await page.screenshot({ path: join(shots, '1c-new-session.png') });
   await page.locator('.ns-context-x').click();
   await page.keyboard.press('Escape');

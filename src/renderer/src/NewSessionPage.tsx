@@ -3,6 +3,7 @@ import type { NewSessionRequest, ProjectRow, SessionListItem } from '../../share
 import { api } from './api';
 import { shortPath, timeAgo } from './format';
 import { withContext } from './newSession';
+import { dotClass, dotTitle } from './Sidebar';
 
 interface Props {
   initial?: { cwd?: string; prompt?: string };
@@ -10,7 +11,12 @@ interface Props {
   sessions: SessionListItem[];
   onStart: (req: NewSessionRequest) => void;
   onCancel: () => void;
+  /** Opens an earlier session from the grid. */
+  onOpen: (id: string) => void;
 }
+
+/** Cards shown before "Show more". */
+const GRID_FIRST = 6;
 
 const MODES: Record<NonNullable<NewSessionRequest['permissionMode']>, string> = {
   default: 'Ask before edits',
@@ -30,7 +36,7 @@ function readSettingsOpen(): boolean {
   }
 }
 
-export function NewSessionPage({ initial, sessions, onStart, onCancel }: Props) {
+export function NewSessionPage({ initial, sessions, onStart, onCancel, onOpen }: Props) {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [cwd, setCwd] = useState(initial?.cwd ?? '');
   const [prompt, setPrompt] = useState(initial?.prompt ?? '');
@@ -54,13 +60,17 @@ export function NewSessionPage({ initial, sessions, onStart, onCancel }: Props) 
   useEffect(() => {
     setContextId(null);
     setPicking(false);
+    setShowAll(false);
   }, [cwd]);
 
   // A folder picked from disk that isn't a known project still needs to show in the list.
   const options = cwd && !projects.some((p) => p.cwd === cwd) ? [{ cwd, name: cwd.split('/').pop() ?? cwd }, ...projects] : projects;
-  const inProject = useMemo(() => sessions.filter((s) => s.cwd === cwd).slice(0, 8), [sessions, cwd]);
+  const projectSessions = useMemo(() => sessions.filter((s) => s.cwd === cwd && !s.hidden), [sessions, cwd]);
+  const inProject = projectSessions.slice(0, 8);
+  const [showAll, setShowAll] = useState(false);
+  const grid = showAll ? projectSessions.slice(0, 30) : projectSessions.slice(0, GRID_FIRST);
   const branch = inProject.find((s) => s.gitBranch)?.gitBranch ?? null;
-  const context = inProject.find((s) => s.id === contextId) ?? null;
+  const context = projectSessions.find((s) => s.id === contextId) ?? null;
 
   const submit = () => {
     if (!cwd || (!prompt.trim() && !context)) return;
@@ -248,6 +258,51 @@ export function NewSessionPage({ initial, sessions, onStart, onCancel }: Props) 
             Working folder · <span className="mono">{shortPath(cwd)}</span>
             {worktree && <span> (in a new git worktree)</span>}
           </p>
+        )}
+
+        {grid.length > 0 && (
+          <section className="ns-recent" aria-label="Sessions in this project">
+            <div className="ns-recent-head">
+              <span>Sessions in {options.find((p) => p.cwd === cwd)?.name ?? 'this folder'}</span>
+              {projectSessions.length > GRID_FIRST && (
+                <button type="button" className="ns-more" onClick={() => setShowAll((v) => !v)}>
+                  {showAll ? 'Show fewer' : `Show all ${Math.min(projectSessions.length, 30)}`}
+                </button>
+              )}
+            </div>
+            <div className="ns-grid">
+              {grid.map((s) => (
+                <div key={s.id} className={`ns-card${s.id === contextId ? ' in-context' : ''}`}>
+                  <button type="button" className="ns-card-open" onClick={() => onOpen(s.id)} aria-label={`Continue ${s.title}`}>
+                    <span className="ns-card-top">
+                      <span className={`dot ${dotClass(s)}`} title={dotTitle(s)} />
+                      <span className="ns-card-title">{s.title}</span>
+                    </span>
+                    <span className="ns-card-sum">{s.summary || s.lastPrompt || 'No summary yet.'}</span>
+                    <span className="ns-card-meta">
+                      <span className="mono">{s.gitBranch ?? ''}</span>
+                      <span>{s.status === 'busy' ? 'now' : timeAgo(s.lastTs, Date.now(), true)}</span>
+                    </span>
+                  </button>
+                  <span className="ns-card-actions">
+                    <button type="button" className="ns-card-btn pri" onClick={() => onOpen(s.id)}>
+                      Continue
+                    </button>
+                    <button
+                      type="button"
+                      className="ns-card-btn"
+                      onClick={() => {
+                        setContextId(s.id);
+                        promptRef.current?.focus();
+                      }}
+                    >
+                      Use as context
+                    </button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
         )}
       </div>
     </div>

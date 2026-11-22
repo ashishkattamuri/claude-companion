@@ -590,3 +590,26 @@ button.chip:hover:not(:disabled) { color: var(--ink); }
 .group-caret { display: inline-block; width: 8px; }
 .where-icon { display: inline-flex; color: var(--faint); }
 .where-icon svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
+
+/* New session page: sessions in the project. Sits below everything else so the prompt never moves. */
+.ns-recent { margin-top: 20px; display: flex; flex-direction: column; gap: 10px; }
+.ns-recent-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
+.ns-more { border: 0; background: none; padding: 0; color: var(--accent); font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+.ns-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.ns-card { position: relative; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); transition: border-color 0.15s, box-shadow 0.15s, background 0.15s; }
+.ns-card:hover, .ns-card:has(:focus-visible) { background: var(--surface); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); box-shadow: var(--shadow); }
+.ns-card.in-context { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.ns-card-open { width: 100%; border: 0; background: none; text-align: left; padding: 12px 12px 10px; display: flex; flex-direction: column; gap: 6px; color: inherit; font: inherit; border-radius: 12px; }
+.ns-card-top { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.ns-card-top .dot { flex-shrink: 0; }
+.ns-card-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ns-card-sum { font-size: 12px; line-height: 1.45; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: calc(12px * 1.45 * 2); }
+.ns-card-meta { display: flex; justify-content: space-between; gap: 8px; font-size: 11.5px; color: var(--faint); }
+.ns-card-meta .mono { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ns-card-actions { position: absolute; left: 1px; right: 1px; bottom: 1px; padding: 4px 10px 6px; border-radius: 0 0 11px 11px; background: var(--surface); display: flex; justify-content: flex-end; gap: 6px; opacity: 0; pointer-events: none; transition: opacity 0.12s; }
+.ns-card:hover .ns-card-actions, .ns-card:has(:focus-visible) .ns-card-actions { opacity: 1; pointer-events: auto; }
+.ns-card-btn { border: 1px solid var(--line); background: var(--surface); border-radius: 7px; padding: 3px 9px; font-size: 12px; font-weight: 500; }
+.ns-card-btn:hover { border-color: var(--faint); }
+.ns-card-btn.pri { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+@media (max-width: 900px) { .ns-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .ns-grid { grid-template-columns: 1fr; } }
