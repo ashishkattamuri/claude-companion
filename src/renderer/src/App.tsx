@@ -20,7 +20,7 @@ const SOON: Record<Exclude<Page, 'today' | 'connectors'>, { title: string; text:
 };
 
 export function App() {
-  const [selection, setSelection] = useState<Selection>({ kind: 'page', page: 'today' });
+  const [selection, setSelection] = useState<Selection>({ kind: 'new', back: { kind: 'page', page: 'today' } });
   const [list, setList] = useState<SessionListItem[]>([]);
   const [search, setSearch] = useState('');
   const [recap, setRecap] = useState<RecapView | null>(null);

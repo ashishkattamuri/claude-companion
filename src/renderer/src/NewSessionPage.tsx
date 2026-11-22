@@ -61,7 +61,7 @@ export function NewSessionPage({ initial, sessions, onStart, onCancel }: Props) 
   const context = inProject.find((s) => s.id === contextId) ?? null;
 
   const submit = () => {
-    if (!cwd) return;
+    if (!cwd || (!prompt.trim() && !context)) return;
     const text = withContext(prompt, context);
     onStart({ cwd, prompt: text, permissionMode, worktree, model: model || undefined });
   };
@@ -83,7 +83,7 @@ export function NewSessionPage({ initial, sessions, onStart, onCancel }: Props) 
     return () => window.removeEventListener('keydown', onKey);
   }, [picking, onCancel]);
 
-  const label = prompt.trim() ? 'Start session' : context ? 'Start with context' : 'Open empty session';
+  const canSend = !!cwd && (!!prompt.trim() || !!context);
 
   return (
     <div className="page ns-page">
@@ -141,6 +141,13 @@ export function NewSessionPage({ initial, sessions, onStart, onCancel }: Props) 
             placeholder="What should Claude work on?"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              // Like the chat composer: Enter sends, Shift+Enter adds a line.
+              if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                submit();
+              }
+            }}
           />
           {context && (
             <div className="ns-context">
@@ -183,8 +190,8 @@ export function NewSessionPage({ initial, sessions, onStart, onCancel }: Props) 
                 </ul>
               )}
             </div>
-            <button type="submit" className="btn primary ns-go" disabled={!cwd}>
-              {label} <span className="ns-kbd">⌘↵</span>
+            <button type="submit" className="send ns-go" disabled={!canSend}>
+              Send ↵
             </button>
           </div>
         </form>

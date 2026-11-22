@@ -107,8 +107,10 @@ try {
     // Its own app-data folder, so a dev copy that's running can't hold its single-instance lock.
     check('the packaged app is named Companion for Claude', (await app.evaluate(({ app }) => app.getName())) === 'Companion for Claude');
   }
-  check('opens on Today', await until(async () => /Good (morning|afternoon|evening)/.test(await page.locator('h1').innerText())));
+  check('opens on New session', await until(async () => (await page.locator('.ns-page .ns-title').count()) === 1));
   check('lists the earlier session', await until(async () => (await page.locator('.sessions').innerText()).includes('Webhook retry logic')));
+  await page.locator('.nav button', { hasText: 'Today' }).click();
+  check('Today is a click away', await until(async () => /Good (morning|afternoon|evening)/.test(await page.locator('h1').innerText())));
   await page.screenshot({ path: join(shots, '1-today.png') });
 
   await page.locator('.s-row', { hasText: 'Webhook retry logic' }).click();
@@ -163,11 +165,11 @@ try {
   check('new session opens as a page, not a modal', await until(async () => (await page.locator('.ns-page .ns-title').count()) === 1 && (await page.locator('.sheet-bg').count()) === 0));
   check('the sidebar marks New session as open', (await page.locator('.new-btn.active').count()) === 1);
   await page.selectOption('#ns-project', project);
-  check('with no prompt it offers an empty session', (await page.locator('.ns-go').innerText()).includes('Open empty session'));
+  check('with nothing to send, Send is off', await page.locator('.ns-go').isDisabled());
   check('settings summary names the defaults', (await page.locator('.ns-settings summary').innerText()).includes('Current checkout · Ask before edits'));
   await page.locator('.ns-bring').click();
   await page.locator('.ns-menu button').first().click();
-  check('an earlier session can be brought in as context', (await page.locator('.ns-context').count()) === 1 && (await page.locator('.ns-go').innerText()).includes('Start with context'));
+  check('an earlier session can be brought in as context', (await page.locator('.ns-context').count()) === 1 && (await page.locator('.ns-go').isEnabled()));
   await page.screenshot({ path: join(shots, '1c-new-session.png') });
   await page.locator('.ns-context-x').click();
   await page.keyboard.press('Escape');
@@ -175,8 +177,8 @@ try {
   await page.keyboard.press('Meta+n');
   await page.selectOption('#ns-project', project);
   await page.fill('#ns-prompt', 'hello from the sheet');
-  check('with a prompt it starts the session', (await page.locator('.ns-go').innerText()).includes('Start session'));
-  await page.keyboard.press('Meta+Enter');
+  check('the page sends with the chat Send button', (await page.locator('.ns-go.send').innerText()).includes('Send') && (await page.locator('.ns-go').isEnabled()));
+  await page.locator('#ns-prompt').press('Enter');
   check('starts a session and shows the reply', await until(async () => (await thread()).includes('echo: hello from the sheet')));
   check('labels the first message as sent from Companion', (await thread()).includes('from Companion'));
 

@@ -565,9 +565,6 @@ button.chip:hover:not(:disabled) { color: var(--ink); }
 .ns-composer-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .ns-context-picker { position: relative; }
 .ns-bring { padding-left: 4px; }
-.ns-go { padding: 9px 16px; border-radius: 10px; font-size: 14px; display: inline-flex; align-items: center; gap: 10px; }
-.ns-go:hover:not(:disabled) { filter: brightness(1.08); }
-.ns-kbd { font: 12px var(--mono); opacity: 0.75; }
 .ns-context { align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; max-width: 100%; background: var(--accent-soft); color: var(--ink); border-radius: 8px; padding: 4px 6px 4px 10px; font-size: 12.5px; }
 .ns-context-tag { font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); }
 .ns-context-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
