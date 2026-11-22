@@ -21,6 +21,8 @@ interface Props {
   onPage: (p: Page) => void;
   onSelect: (id: string) => void;
   onNew: () => void;
+  /** The new-session page is open. */
+  newActive?: boolean;
   onHide: (ids: string[], hidden: boolean) => void;
   /** Resolves true once the chats are gone (false if cancelled or refused). */
   onDelete: (ids: string[]) => Promise<boolean>;
@@ -33,7 +35,7 @@ type Menu = { ids: string[]; x: number; y: number };
 
 const FOLDER_KEY = 'sidebar.folder';
 
-export function Sidebar({ page, sessions: all, selectedId, search, onSearch, onPage, onSelect, onNew, onHide, onDelete, onAudit }: Props) {
+export function Sidebar({ page, sessions: all, selectedId, search, onSearch, onPage, onSelect, onNew, newActive, onHide, onDelete, onAudit }: Props) {
   const [showHidden, setShowHidden] = useState(false);
   /** Only this folder's chats; empty for all folders. Kept across restarts. */
   const [folder, setFolder] = useState(() => localStorage.getItem(FOLDER_KEY) ?? '');
@@ -130,8 +132,10 @@ export function Sidebar({ page, sessions: all, selectedId, search, onSearch, onP
           </button>
         ))}
       </nav>
-      <button className="new-btn" onClick={onNew}>
-        New session <span className="kbd">⌘N</span>
+      <button className={`new-btn${newActive ? ' active' : ''}`} onClick={onNew}>
+        <span>
+          <span className="new-plus">+</span> New session
+        </span> <span className="kbd">⌘N</span>
       </button>
       <input
         className="search"

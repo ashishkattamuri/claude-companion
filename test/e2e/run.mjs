@@ -160,8 +160,22 @@ try {
   }
 
   await page.keyboard.press('Meta+n');
+  check('new session opens as a page, not a modal', await until(async () => (await page.locator('.ns-page .ns-title').count()) === 1 && (await page.locator('.sheet-bg').count()) === 0));
+  check('the sidebar marks New session as open', (await page.locator('.new-btn.active').count()) === 1);
+  await page.selectOption('#ns-project', project);
+  check('with no prompt it offers an empty session', (await page.locator('.ns-go').innerText()).includes('Open empty session'));
+  check('settings summary names the defaults', (await page.locator('.ns-settings summary').innerText()).includes('Current checkout · Ask before edits'));
+  await page.locator('.ns-bring').click();
+  await page.locator('.ns-menu button').first().click();
+  check('an earlier session can be brought in as context', (await page.locator('.ns-context').count()) === 1 && (await page.locator('.ns-go').innerText()).includes('Start with context'));
+  await page.screenshot({ path: join(shots, '1c-new-session.png') });
+  await page.locator('.ns-context-x').click();
+  await page.keyboard.press('Escape');
+  check('Escape leaves the page', await until(async () => (await page.locator('.ns-page').count()) === 0));
+  await page.keyboard.press('Meta+n');
   await page.selectOption('#ns-project', project);
   await page.fill('#ns-prompt', 'hello from the sheet');
+  check('with a prompt it starts the session', (await page.locator('.ns-go').innerText()).includes('Start session'));
   await page.keyboard.press('Meta+Enter');
   check('starts a session and shows the reply', await until(async () => (await thread()).includes('echo: hello from the sheet')));
   check('labels the first message as sent from Companion', (await thread()).includes('from Companion'));

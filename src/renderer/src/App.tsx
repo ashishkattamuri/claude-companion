@@ -2,13 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { NewSessionRequest, RecapView, SessionListItem } from '../../shared/api';
 import { api } from './api';
 import { ConnectorsPage, type ConnectorsTab } from './ConnectorsPage';
-import { NewSessionSheet } from './NewSessionSheet';
+import { NewSessionPage } from './NewSessionPage';
 import { SessionWorkspace, type View } from './SessionWorkspace';
 import { Sidebar, type Page } from './Sidebar';
 import { sessions as store } from './store';
 import { TodayView } from './TodayView';
 
-type Selection = { kind: 'page'; page: Page } | { kind: 'session'; id: string; draft?: string; view?: View };
+type Selection =
+  | { kind: 'page'; page: Page }
+  | { kind: 'session'; id: string; draft?: string; view?: View }
+  | { kind: 'new'; cwd?: string; prompt?: string; back: Selection };
 
 const SOON: Record<Exclude<Page, 'today' | 'connectors'>, { title: string; text: string }> = {
   ideas: { title: 'Ideas', text: 'Follow-ups and directions from your conversations, ready to run in one click.' },
@@ -21,7 +24,6 @@ export function App() {
   const [list, setList] = useState<SessionListItem[]>([]);
   const [search, setSearch] = useState('');
   const [recap, setRecap] = useState<RecapView | null>(null);
-  const [sheet, setSheet] = useState<{ cwd?: string; prompt?: string } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [connectorsAt, setConnectorsAt] = useState<{ tab: ConnectorsTab; search?: string } | undefined>(undefined);
   const openId = useRef<string | null>(null);
@@ -62,7 +64,6 @@ export function App() {
 
   const startSession = useCallback(
     async (req: NewSessionRequest) => {
-      setSheet(null);
       const r = await api.newSession(req);
       if (!r.ok) return setToast(r.error);
       setSelection({ kind: 'session', id: r.value });
@@ -71,16 +72,20 @@ export function App() {
     [reload],
   );
 
+  const openNew = useCallback((initial: { cwd?: string; prompt?: string } = {}) => {
+    setSelection((cur) => ({ kind: 'new', ...initial, back: cur.kind === 'new' ? cur.back : cur }));
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey && e.key === 'n') {
         e.preventDefault();
-        setSheet({});
+        openNew();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [openNew]);
 
   const cwdFor = (project: string, sessionId: string) =>
     list.find((s) => s.id === sessionId)?.cwd ?? list.find((s) => s.project === project)?.cwd ?? undefined;
@@ -95,7 +100,8 @@ export function App() {
         onSearch={setSearch}
         onPage={(page) => setSelection({ kind: 'page', page })}
         onSelect={(id) => setSelection({ kind: 'session', id })}
-        onNew={() => setSheet({})}
+        onNew={() => openNew()}
+        newActive={selection.kind === 'new'}
         onHide={(ids, hidden) => void api.setHidden(ids, hidden).then(reload)}
         onDelete={async (ids) => {
           const r = await api.deleteSessions(ids);
@@ -125,10 +131,19 @@ export function App() {
             onNavigate={(id) => setSelection({ kind: 'session', id })}
           />
         )}
+        {selection.kind === 'new' && (
+          <NewSessionPage
+            key={`${selection.cwd ?? ''}:${selection.prompt ?? ''}`}
+            initial={selection}
+            sessions={list}
+            onStart={(req) => void startSession(req)}
+            onCancel={() => setSelection(selection.back)}
+          />
+        )}
         {selection.kind === 'page' && selection.page === 'today' && (
           <TodayView
             data={recap}
-            onStart={(project, sessionId, text) => setSheet({ cwd: cwdFor(project, sessionId), prompt: text })}
+            onStart={(project, sessionId, text) => openNew({ cwd: cwdFor(project, sessionId), prompt: text })}
             onContinue={(id, text) => setSelection({ kind: 'session', id, draft: text })}
             onRegenerate={() => void api.regenerateRecap()}
             onConnectors={(at) => {
@@ -148,7 +163,6 @@ export function App() {
           </div>
         )}
       </main>
-      {sheet && <NewSessionSheet initial={sheet} onStart={(req) => void startSession(req)} onCancel={() => setSheet(null)} />}
       {toast && (
         <div className="toast" role="status" onClick={() => setToast(null)}>
           {toast}
