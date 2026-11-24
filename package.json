@@ -1,6 +1,6 @@
 {
   "name": "claude-companion",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Context and session management for Claude Code",
   "type": "module",
   "license": "MIT",
